@@ -20,6 +20,7 @@ from src.plugin_system import (
     ConfigField,
     EventType,
     MaiMessages,
+    send_api,
 )
 from src.common.logger import get_logger
 
@@ -30,16 +31,25 @@ logger = get_logger("mai_plugin_impart")
 
 
 def _uid(cmd: BaseCommand) -> str:
-    return str(cmd.message.message_info.user_info.user_id)
+    try:
+        return str(cmd.message.message_info.user_info.user_id)
+    except Exception:
+        return "0"
 
 
 def _nick(cmd: BaseCommand) -> str:
-    return str(cmd.message.message_info.user_info.user_nickname)
+    try:
+        return str(cmd.message.message_info.user_info.user_nickname)
+    except Exception:
+        return "用户"
 
 
 def _gid(cmd: BaseCommand) -> int:
-    gi = cmd.message.message_info.group_info
-    return int(gi.group_id) if gi and gi.group_id else 0
+    try:
+        gi = cmd.message.message_info.group_info
+        return int(gi.group_id) if gi and gi.group_id else 0
+    except Exception:
+        return 0
 
 
 _cd_cache: Dict[str, Dict[str, float]] = {
@@ -70,9 +80,65 @@ def _get_random_num() -> float:
     return round(random.uniform(0, 1) if rand > 0.1 else random.uniform(1, 2), 3)
 
 
-def _parse_at(raw_message: str) -> Optional[str]:
-    m = re.search(r"@(\d+)", raw_message)
-    return m.group(1) if m else None
+def _extract_ats(seg) -> list[str]:
+    try:
+        if seg is None:
+            return []
+        t = getattr(seg, "type", None)
+        d = getattr(seg, "data", None)
+        if t == "at":
+            return [str(d)]
+        if t == "seglist" and isinstance(d, list):
+            result = []
+            for child in d:
+                result.extend(_extract_ats(child))
+            return result
+    except Exception:
+        pass
+    return []
+
+
+def _parse_at(cmd: BaseCommand) -> Optional[str]:
+    try:
+        seg = cmd.message.message_segment
+        ats = _extract_ats(seg)
+        if ats:
+            return ats[0]
+    except Exception:
+        pass
+    raw = getattr(cmd.message, "raw_message", None)
+    if raw:
+        m = re.search(r"@(\d+)", raw)
+        if m:
+            return m.group(1)
+    return None
+
+
+def _stream_id(cmd: BaseCommand) -> Optional[str]:
+    chat_stream = getattr(cmd, 'chat_stream', None)
+    if chat_stream is None:
+        message_obj = getattr(cmd, 'message', None)
+        if message_obj:
+            chat_stream = getattr(message_obj, 'chat_stream', None)
+    if chat_stream is None:
+        return None
+    return getattr(chat_stream, 'stream_id', None)
+
+
+async def _send_text(cmd: BaseCommand, text: str) -> bool:
+    sid = _stream_id(cmd)
+    if not sid:
+        logger.error("_send_text: stream_id not found")
+        return False
+    return await send_api.text_to_stream(text=text, stream_id=sid)
+
+
+async def _send_image(cmd: BaseCommand, image_base64: str) -> bool:
+    sid = _stream_id(cmd)
+    if not sid:
+        logger.error("_send_image: stream_id not found")
+        return False
+    return await send_api.image_to_stream(image_base64=image_base64, stream_id=sid)
 
 
 def _get_jj_variable(config_str: str) -> str:
@@ -119,7 +185,7 @@ class HelpCommand(BaseCommand):
             "[银趴介绍|impart介绍]\n"
             "输出impart插件的命令列表\n"
         )
-        await self.send_text(usage_text)
+        await _send_text(self, usage_text)
         return True, "帮助信息已发送", True
 
 
@@ -137,7 +203,7 @@ class QueryCommand(BaseCommand):
 
         if not await db.is_in_table(db_path, target_uid):
             await db.add_new_user(db_path, target_uid)
-            await self.send_text(f"{pronoun}还没有创建{jj_var}喵, 咱帮{pronoun}创建了喵, 目前长度是10cm喵")
+            await _send_text(self, f"{pronoun}还没有创建{jj_var}喵, 咱帮{pronoun}创建了喵, 目前长度是10cm喵")
             return True, "创建成功", True
 
         length = await db.get_jj_length(db_path, target_uid)
@@ -153,7 +219,7 @@ class QueryCommand(BaseCommand):
         else:
             msg = f"{pronoun}已经是女孩子啦！\n{pronoun}的{jj_var}目前长度为{length}cm喵"
 
-        await self.send_text(msg)
+        await _send_text(self, msg)
         return True, "查询成功", True
 
 
@@ -169,7 +235,7 @@ class JjRankCommand(BaseCommand):
 
         rankdata = await db.get_sorted(db_path)
         if len(rankdata) < 5:
-            await self.send_text("目前记录的数据量小于5, 无法显示rank喵")
+            await _send_text(self, "目前记录的数据量小于5, 无法显示rank喵")
             return True, "数据不足", True
 
         top5 = rankdata[:5]
@@ -178,7 +244,7 @@ class JjRankCommand(BaseCommand):
         index = [i for i in range(len(rankdata)) if rankdata[i]["userid"] == uid]
         if not index:
             await db.add_new_user(db_path, uid)
-            await self.send_text(f"你还没有创建{jj_var}看不到rank喵, 咱帮你创建了喵, 目前长度是10cm喵")
+            await _send_text(self, f"你还没有创建{jj_var}看不到rank喵, 咱帮你创建了喵, 目前长度是10cm喵")
             return True, "创建成功", True
 
         user_rank = index[0] + 1
@@ -191,8 +257,8 @@ class JjRankCommand(BaseCommand):
 
         img_bytes = await draw_bar_chart.draw_bar_chart(data)
         img_b64 = base64.b64encode(img_bytes).decode("utf-8")
-        await self.send_image(img_b64)
-        await self.send_text(f"你的排名为{user_rank}喵")
+        await _send_image(self, img_b64)
+        await _send_text(self, f"你的排名为{user_rank}喵")
         return True, "排行榜已发送", True
 
 
@@ -211,7 +277,7 @@ class InjectionQueryCommand(BaseCommand):
         if is_all:
             data = await db.get_ejaculation_data(db_path, target_id)
             if not data:
-                await self.send_text(f"{replay1}历史总被注射量为0ml")
+                await _send_text(self, f"{replay1}历史总被注射量为0ml")
                 return True, "查询成功", True
             ejaculation = 0.0
             inject_data = {}
@@ -219,16 +285,16 @@ class InjectionQueryCommand(BaseCommand):
                 ejaculation += item["volume"]
                 inject_data[item["date"]] = item["volume"]
             if len(inject_data) < 2:
-                await self.send_text(f"{replay1}历史总被注射量为{ejaculation}ml")
+                await _send_text(self, f"{replay1}历史总被注射量为{ejaculation}ml")
                 return True, "查询成功", True
 
             img_bytes = await draw_bar_chart.draw_line_chart(inject_data)
             img_b64 = base64.b64encode(img_bytes).decode("utf-8")
-            await self.send_text(f"{replay1}历史总被注射量为{ejaculation}ml")
-            await self.send_image(img_b64)
+            await _send_text(self, f"{replay1}历史总被注射量为{ejaculation}ml")
+            await _send_image(self, img_b64)
         else:
             ejaculation = await db.get_today_ejaculation_data(db_path, target_id)
-            await self.send_text(f"{replay1}当日总被注射量为{ejaculation}ml")
+            await _send_text(self, f"{replay1}当日总被注射量为{ejaculation}ml")
 
         return True, "查询成功", True
 
@@ -246,14 +312,14 @@ class DajiaoCommand(BaseCommand):
 
         cd_allowed, remaining = _check_cd("dajiao", uid_str, self.get_config("commands.dj_cd_time", 300))
         if not cd_allowed:
-            await self.send_text(f"你已经打不动了喵, 请等待{round(remaining, 3)}秒后再打喵")
+            await _send_text(self, f"你已经打不动了喵, 请等待{round(remaining, 3)}秒后再打喵")
             return True, "CD中", True
 
         _update_cd("dajiao", uid_str)
 
         if not await db.is_in_table(db_path, uid):
             await db.add_new_user(db_path, uid)
-            await self.send_text(f"你还没有创建{jj_var}, 咱帮你创建了喵, 目前长度是10cm喵")
+            await _send_text(self, f"你还没有创建{jj_var}, 咱帮你创建了喵, 目前长度是10cm喵")
             return True, "创建成功", True
 
         uid_length = await db.get_jj_length(db_path, uid)
@@ -261,7 +327,7 @@ class DajiaoCommand(BaseCommand):
         uid_status = await db.update_challenge_status(db_path, uid)
 
         if "is_challenging" in uid_status:
-            await self.send_text(f"你的{jj_var}长度在任务范围内，不允许打胶，请专心与群友pk！")
+            await _send_text(self, f"你的{jj_var}长度在任务范围内，不允许打胶，请专心与群友pk！")
             return True, "挑战中", True
 
         await db.set_jj_length(db_path, uid, random_num)
@@ -278,7 +344,7 @@ class DajiaoCommand(BaseCommand):
         else:
             msg = f"打胶结束喵, 你的{jj_var}很满意喵, 长了{random_num}cm喵, 目前长度为{new_length}cm喵"
 
-        await self.send_text(msg)
+        await _send_text(self, msg)
         return True, "打胶成功", True
 
 
@@ -295,20 +361,19 @@ class SuoCommand(BaseCommand):
 
         cd_allowed, remaining = _check_cd("suo", uid_str, self.get_config("commands.suo_cd_time", 300))
         if not cd_allowed:
-            await self.send_text(f"你已经嗦不动了喵, 请等待{round(remaining, 3)}秒后再嗦喵")
+            await _send_text(self, f"你已经嗦不动了喵, 请等待{round(remaining, 3)}秒后再嗦喵")
             return True, "CD中", True
 
         _update_cd("suo", uid_str)
 
-        raw_message = self.message.raw_message if hasattr(self.message, "raw_message") else ""
-        target_str = self.matched_groups.get("target") or _parse_at(raw_message)
+        target_str = self.matched_groups.get("target") or _parse_at(self)
         target_id = int(target_str) if target_str else uid
         pronoun = "你" if target_id == uid else "TA"
 
         if not await db.is_in_table(db_path, target_id):
             await db.add_new_user(db_path, target_id)
             _delete_cd("suo", uid_str)
-            await self.send_text(f"{pronoun}还没有创建{jj_var}喵, 咱帮{pronoun}创建了喵, 目前长度是10cm喵")
+            await _send_text(self, f"{pronoun}还没有创建{jj_var}喵, 咱帮{pronoun}创建了喵, 目前长度是10cm喵")
             return True, "创建成功", True
 
         current_length = await db.get_jj_length(db_path, target_id)
@@ -316,7 +381,7 @@ class SuoCommand(BaseCommand):
         target_status = await db.update_challenge_status(db_path, target_id)
 
         if "is_challenging" in target_status:
-            await self.send_text(f"{pronoun}的{jj_var}长度在任务范围内，不准嗦！请专心与群友pk！")
+            await _send_text(self, f"{pronoun}的{jj_var}长度在任务范围内，不准嗦！请专心与群友pk！")
             return True, "挑战中", True
 
         await db.set_jj_length(db_path, target_id, random_num)
@@ -332,7 +397,7 @@ class SuoCommand(BaseCommand):
         else:
             msg = f"{pronoun}的{jj_var}很满意喵, 嗦长了{random_num}cm喵, 目前长度为{new_length}cm喵"
 
-        await self.send_text(msg)
+        await _send_text(self, msg)
         return True, "嗦成功", True
 
 
@@ -352,10 +417,10 @@ class ToggleCommand(BaseCommand):
 
         if "开启" in command or "开始" in command:
             await db.set_group_allow(db_path, group_id, True)
-            await self.send_text("功能已开启喵")
+            await _send_text(self, "功能已开启喵")
         elif "禁止" in command or "关闭" in command:
             await db.set_group_allow(db_path, group_id, False)
-            await self.send_text("功能已禁用喵")
+            await _send_text(self, "功能已禁用喵")
 
         return True, "操作成功", True
 
@@ -373,25 +438,24 @@ class PKCommand(BaseCommand):
 
         group_id = _gid(self)
         if not await db.check_group_allow(db_path, group_id):
-            await self.send_text(self.get_config("plugin.not_allow", "群内还未开启impart游戏, 请管理员或群主发送\"开始银趴\", \"禁止银趴\"以开启/关闭该功能"))
+            await _send_text(self, self.get_config("plugin.not_allow", "群内还未开启impart游戏, 请管理员或群主发送\"开始银趴\", \"禁止银趴\"以开启/关闭该功能"))
             return True, "未开启", True
 
         cd_allowed, remaining = _check_cd("pk", uid_str, self.get_config("commands.pk_cd_time", 60))
         if not cd_allowed:
-            await self.send_text(f"你已经pk不动了喵, 请等待{round(remaining, 3)}秒后再pk喵")
+            await _send_text(self, f"你已经pk不动了喵, 请等待{round(remaining, 3)}秒后再pk喵")
             return True, "CD中", True
 
         _update_cd("pk", uid_str)
 
-        raw_message = self.message.raw_message if hasattr(self.message, "raw_message") else ""
-        target_str = self.matched_groups.get("target") or _parse_at(raw_message)
+        target_str = self.matched_groups.get("target") or _parse_at(self)
         if not target_str:
-            await self.send_text("请指定要PK的对象喵，例如: pk @用户")
+            await _send_text(self, "请指定要PK的对象喵，例如: pk @用户")
             return True, "无目标", True
 
         at = target_str
         if at == uid_str:
-            await self.send_text("你不能pk自己喵")
+            await _send_text(self, "你不能pk自己喵")
             return True, "无法pk自己", True
 
         bot_name = self.get_config("plugin.bot_name", "BOT")
@@ -416,14 +480,14 @@ class PKCommand(BaseCommand):
                 await db.set_jj_length(db_path, int(at), rn / 2)
                 msg = await self._handle_pk_loss(db_path, uid, at, length_increase, length_decrease, jj_var, bot_name)
 
-            await self.send_text(msg)
+            await _send_text(self, msg)
         else:
             if not await db.is_in_table(db_path, uid):
                 await db.add_new_user(db_path, uid)
             if not await db.is_in_table(db_path, int(at)):
                 await db.add_new_user(db_path, int(at))
             _delete_cd("pk", uid_str)
-            await self.send_text(f"你或对面还没有创建{jj_var}喵, 咱全帮你创建了喵, 你们的{jj_var}长度都是10cm喵")
+            await _send_text(self, f"你或对面还没有创建{jj_var}喵, 咱全帮你创建了喵, 你们的{jj_var}长度都是10cm喵")
 
         return True, "PK完成", True
 
@@ -500,12 +564,12 @@ class YinpaCommand(BaseCommand):
 
         group_id = _gid(self)
         if not await db.check_group_allow(db_path, group_id):
-            await self.send_text(self.get_config("plugin.not_allow", "群内还未开启impart游戏"))
+            await _send_text(self, self.get_config("plugin.not_allow", "群内还未开启impart游戏"))
             return True, "未开启", True
 
         cd_allowed, remaining = _check_cd("fuck", uid_str, self.get_config("commands.fuck_cd_time", 3600))
         if not cd_allowed:
-            await self.send_text(f"你已经榨不出来任何东西了, 请先休息{round(remaining, 3)}秒")
+            await _send_text(self, f"你已经榨不出来任何东西了, 请先休息{round(remaining, 3)}秒")
             return True, "CD中", True
         _update_cd("fuck", uid_str)
 
@@ -517,32 +581,32 @@ class YinpaCommand(BaseCommand):
         user_nick = _nick(self) or f"用户{uid}"
 
         random_nn = random.uniform(0, 1)
-        at_target = _parse_at(raw_message)
+        at_target = _parse_at(self)
 
         if command_type == "群友":
             if at_target:
                 lucky_user = int(at_target)
-                await self.send_text(f"现在咱将把目标\n送给{user_nick}色色！")
+                await _send_text(self, f"现在咱将把目标\n送给{user_nick}色色！")
             else:
                 lucky_user = uid
                 jj_len = await db.get_jj_length(db_path, uid)
                 if jj_len > 5:
-                    await self.send_text(f"现在咱将随机抽取一位幸运群友\n送给{user_nick}色色！\n（使用@指定目标效果更佳）")
+                    await _send_text(self, f"现在咱将随机抽取一位幸运群友\n送给{user_nick}色色！\n（使用@指定目标效果更佳）")
                 elif 5 >= jj_len > 0:
                     if random_nn < 0.5:
-                        await self.send_text(f"{bot_name}发现你是xnn~现在咱将{user_nick}\n送给随机一位幸运群友色色！\n（使用@指定目标）")
+                        await _send_text(self, f"{bot_name}发现你是xnn~现在咱将{user_nick}\n送给随机一位幸运群友色色！\n（使用@指定目标）")
                     else:
-                        await self.send_text(f"现在咱将随机抽取一位幸运群友\n送给{user_nick}色色！\n（使用@指定目标）")
+                        await _send_text(self, f"现在咱将随机抽取一位幸运群友\n送给{user_nick}色色！\n（使用@指定目标）")
                 else:
-                    await self.send_text(f"唔...你透不了哦~\n现在咱将{user_nick}\n送给随机一位幸运群友色色！\n（使用@指定目标）")
+                    await _send_text(self, f"唔...你透不了哦~\n现在咱将{user_nick}\n送给随机一位幸运群友色色！\n（使用@指定目标）")
                 return True, "需指定目标", True
         else:
             if at_target:
                 lucky_user = int(at_target)
                 role_name = "群主" if command_type == "群主" else "管理"
-                await self.send_text(f"现在咱将把{role_name}\n送给{user_nick}色色！")
+                await _send_text(self, f"现在咱将把{role_name}\n送给{user_nick}色色！")
             else:
-                await self.send_text(f"无法确定{'群主' if command_type == '群主' else '管理'}身份，请@指定目标喵")
+                await _send_text(self, f"无法确定{'群主' if command_type == '群主' else '管理'}身份，请@指定目标喵")
                 return True, "需指定目标", True
 
         await asyncio.sleep(2)
@@ -563,7 +627,7 @@ class YinpaCommand(BaseCommand):
                     f"给 {user_nick}({uid}) 注入了{ejaculation}毫升的脱氧核糖核酸, "
                     f"当日总注入量为：{await db.get_today_ejaculation_data(db_path, lucky_user)}毫升")
 
-        await self.send_text(repo)
+        await _send_text(self, repo)
         return True, "透成功", True
 
 

@@ -24,16 +24,16 @@ bot_name = "BOT"
 [commands]
 
 # 打胶冷却时间（秒）
-dj_cd_time = 300
+dj_cd_time = 30
 
 # PK冷却时间（秒）
-pk_cd_time = 60
+pk_cd_time = 6
 
 # 嗦冷却时间（秒）
-suo_cd_time = 300
+suo_cd_time = 30
 
 # 透群友冷却时间（秒）
-fuck_cd_time = 3600
+fuck_cd_time = 36
 
 # 是否开启不活跃惩罚
 isalive = false
