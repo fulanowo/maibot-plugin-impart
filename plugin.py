@@ -1,11 +1,15 @@
 import asyncio
 import base64
+import os
 import random
 import re
+import sys
 import time
 from datetime import datetime, timedelta
 from random import choice
 from typing import Any, ClassVar, Dict, List, Optional, Tuple, Type
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from src.plugin_system import (
     BasePlugin,
@@ -23,6 +27,20 @@ import database as db
 from draw_chart import draw_bar_chart
 
 logger = get_logger("mai_plugin_impart")
+
+
+def _uid(cmd: BaseCommand) -> str:
+    return str(cmd.message.message_info.user_info.user_id)
+
+
+def _nick(cmd: BaseCommand) -> str:
+    return str(cmd.message.message_info.user_info.user_nickname)
+
+
+def _gid(cmd: BaseCommand) -> int:
+    gi = cmd.message.message_info.group_info
+    return int(gi.group_id) if gi and gi.group_id else 0
+
 
 _cd_cache: Dict[str, Dict[str, float]] = {
     "dajiao": {},
@@ -113,8 +131,8 @@ class QueryCommand(BaseCommand):
     async def execute(self) -> Tuple[bool, Optional[str], bool]:
         db_path = _get_db_path(self.get_config)
         target_str = self.matched_groups.get("target")
-        target_uid = int(target_str) if target_str else int(self.user_id)
-        pronoun = "你" if str(target_uid) == self.user_id else "TA"
+        target_uid = int(target_str) if target_str else int(_uid(self))
+        pronoun = "你" if str(target_uid) == _uid(self) else "TA"
         jj_var = _get_jj_variable(self.get_config("plugin.jj_variable", "牛子,牛牛,newnew"))
 
         if not await db.is_in_table(db_path, target_uid):
@@ -146,7 +164,7 @@ class JjRankCommand(BaseCommand):
 
     async def execute(self) -> Tuple[bool, Optional[str], bool]:
         db_path = _get_db_path(self.get_config)
-        uid = int(self.user_id)
+        uid = int(_uid(self))
         jj_var = _get_jj_variable(self.get_config("plugin.jj_variable", "牛子,牛牛,newnew"))
 
         rankdata = await db.get_sorted(db_path)
@@ -186,7 +204,7 @@ class InjectionQueryCommand(BaseCommand):
     async def execute(self) -> Tuple[bool, Optional[str], bool]:
         db_path = _get_db_path(self.get_config)
         target_str = self.matched_groups.get("target")
-        target_id = int(target_str) if target_str else int(self.user_id)
+        target_id = int(target_str) if target_str else int(_uid(self))
         is_all = self.matched_groups.get("all") in ("历史", "全部")
         replay1 = "该用户" if target_str else "您"
 
@@ -222,7 +240,7 @@ class DajiaoCommand(BaseCommand):
 
     async def execute(self) -> Tuple[bool, Optional[str], bool]:
         db_path = _get_db_path(self.get_config)
-        uid = int(self.user_id)
+        uid = int(_uid(self))
         uid_str = str(uid)
         jj_var = _get_jj_variable(self.get_config("plugin.jj_variable", "牛子,牛牛,newnew"))
 
@@ -271,7 +289,7 @@ class SuoCommand(BaseCommand):
 
     async def execute(self) -> Tuple[bool, Optional[str], bool]:
         db_path = _get_db_path(self.get_config)
-        uid = int(self.user_id)
+        uid = int(_uid(self))
         uid_str = str(uid)
         jj_var = _get_jj_variable(self.get_config("plugin.jj_variable", "牛子,牛牛,newnew"))
 
@@ -330,7 +348,7 @@ class ToggleCommand(BaseCommand):
         if not m:
             return True, "无法解析命令", True
         command = m.group(1)
-        group_id = int(self.group_id) if self.group_id else 0
+        group_id = _gid(self)
 
         if "开启" in command or "开始" in command:
             await db.set_group_allow(db_path, group_id, True)
@@ -349,11 +367,11 @@ class PKCommand(BaseCommand):
 
     async def execute(self) -> Tuple[bool, Optional[str], bool]:
         db_path = _get_db_path(self.get_config)
-        uid = int(self.user_id)
+        uid = int(_uid(self))
         uid_str = str(uid)
         jj_var = _get_jj_variable(self.get_config("plugin.jj_variable", "牛子,牛牛,newnew"))
 
-        group_id = int(self.group_id) if self.group_id else 0
+        group_id = _gid(self)
         if not await db.check_group_allow(db_path, group_id):
             await self.send_text(self.get_config("plugin.not_allow", "群内还未开启impart游戏, 请管理员或群主发送\"开始银趴\", \"禁止银趴\"以开启/关闭该功能"))
             return True, "未开启", True
@@ -473,14 +491,14 @@ class YinpaCommand(BaseCommand):
 
     async def execute(self) -> Tuple[bool, Optional[str], bool]:
         db_path = _get_db_path(self.get_config)
-        uid = int(self.user_id)
+        uid = int(_uid(self))
         uid_str = str(uid)
         jj_var = _get_jj_variable(self.get_config("plugin.jj_variable", "牛子,牛牛,newnew"))
         ban_id_str = self.get_config("security.ban_id_list", "")
         ban_set = _get_ban_id_set(ban_id_str)
         bot_name = self.get_config("plugin.bot_name", "BOT")
 
-        group_id = int(self.group_id) if self.group_id else 0
+        group_id = _gid(self)
         if not await db.check_group_allow(db_path, group_id):
             await self.send_text(self.get_config("plugin.not_allow", "群内还未开启impart游戏"))
             return True, "未开启", True
@@ -496,7 +514,7 @@ class YinpaCommand(BaseCommand):
         if not command_match:
             return True, "无法解析命令", True
         command_type = command_match.group(2)
-        user_nick = self.user_nickname or f"用户{uid}"
+        user_nick = _nick(self) or f"用户{uid}"
 
         random_nn = random.uniform(0, 1)
         at_target = _parse_at(raw_message)

@@ -1,0 +1,64 @@
+# mai_plugin_impart - 自动生成的配置文件
+# MaiBot 银趴插件，包含PK、打胶、嗦牛子、查询、排行榜、透群友等功能
+
+# 插件基本配置
+[plugin]
+
+# 是否启用插件
+enabled = true
+
+# 数据库文件路径
+db_path = "data/impart.db"
+
+# 未开启时的提示消息
+not_allow = "群内还未开启impart游戏, 请管理员或群主发送\"开始银趴\", \"禁止银趴\"以开启/关闭该功能"
+
+# 牛牛变量名列表（逗号分隔）
+jj_variable = "牛子,牛牛,newnew"
+
+# 机器人称呼
+bot_name = "BOT"
+
+
+# 命令配置（CD 时间等）
+[commands]
+
+# 打胶冷却时间（秒）
+dj_cd_time = 300
+
+# PK冷却时间（秒）
+pk_cd_time = 60
+
+# 嗦冷却时间（秒）
+suo_cd_time = 300
+
+# 透群友冷却时间（秒）
+fuck_cd_time = 3600
+
+# 是否开启不活跃惩罚
+isalive = false
+
+
+# 安全与白名单
+[security]
+
+# 禁止名单（逗号分隔的QQ号）
+ban_id_list = ""
+
+
+# 登神挑战配置
+[challenge]
+
+# 登神挑战触发长度
+challenge_threshold = 25
+
+# 登神挑战完成长度
+success_threshold = 30
+
+# 挑战失败惩罚缩减长度
+fail_penalty = 5
+
+# 挑战失败胜率恢复倍率
+win_rate_multiplier = 1.25
+
+
