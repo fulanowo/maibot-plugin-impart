@@ -1,0 +1,76 @@
+{
+  "manifest_version": 2,
+  "id": "com.maibot.impart",
+  "name": "银趴插件 Impart",
+  "version": "1.0.0",
+  "description": "MaiBot 银趴插件，包含PK、打胶、嗦牛子、查询、排行榜、透群友等功能",
+  "author": {
+    "name": "mai_plugin_impart",
+    "url": "https://github.com/maibot"
+  },
+  "license": "MIT",
+  "urls": {
+    "repository": "https://github.com/maibot/mai_plugin_impart"
+  },
+  "host_application": {
+    "min_version": "0.8.0",
+    "max_version": "9.9.9"
+  },
+  "sdk": {
+    "min_version": "1.0.0",
+    "max_version": "2.99.99"
+  },
+  "dependencies": [],
+  "capabilities": ["send_message"],
+  "plugin_info": {
+    "is_built_in": false,
+    "plugin_type": "general",
+    "components": [
+      {
+        "type": "command",
+        "name": "pk",
+        "description": "PK/对决 - 与群友进行牛子对决"
+      },
+      {
+        "type": "command",
+        "name": "dajiao",
+        "description": "打胶/开导 - 增加自己的牛子长度"
+      },
+      {
+        "type": "command",
+        "name": "suo",
+        "description": "嗦牛子/嗦 - 增加目标用户的牛子长度"
+      },
+      {
+        "type": "command",
+        "name": "query",
+        "description": "查询 - 查询用户牛子长度"
+      },
+      {
+        "type": "command",
+        "name": "jjrank",
+        "description": "jj排行榜 - 查看牛子排行榜"
+      },
+      {
+        "type": "command",
+        "name": "yinpa",
+        "description": "日群友/透群友 - 透群友互动"
+      },
+      {
+        "type": "command",
+        "name": "toggle",
+        "description": "开启/关闭银趴 - 管理员开关impart功能"
+      },
+      {
+        "type": "command",
+        "name": "injection_query",
+        "description": "注入查询 - 查询被注入量"
+      },
+      {
+        "type": "command",
+        "name": "help",
+        "description": "银趴帮助 - 显示使用说明"
+      }
+    ]
+  }
+}
