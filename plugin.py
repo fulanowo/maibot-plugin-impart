@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from random import choice
 from typing import Any, ClassVar, Dict, List, Optional, Tuple, Type
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # 确保插件目录在 sys.path 中，避免 ModuleNotFoundError
 
 from src.plugin_system import (
     BasePlugin,
@@ -31,6 +31,7 @@ logger = get_logger("mai_plugin_impart")
 
 
 def _uid(cmd: BaseCommand) -> str:
+    """安全获取发送者 user_id，异常时返回 "0" """
     try:
         return str(cmd.message.message_info.user_info.user_id)
     except Exception:
@@ -38,6 +39,7 @@ def _uid(cmd: BaseCommand) -> str:
 
 
 def _nick(cmd: BaseCommand) -> str:
+    """安全获取发送者昵称，异常时返回 "用户" """
     try:
         return str(cmd.message.message_info.user_info.user_nickname)
     except Exception:
@@ -45,6 +47,7 @@ def _nick(cmd: BaseCommand) -> str:
 
 
 def _gid(cmd: BaseCommand) -> int:
+    """安全获取群号，异常时返回 0（私聊场景 group_info 为 None） """
     try:
         gi = cmd.message.message_info.group_info
         return int(gi.group_id) if gi and gi.group_id else 0
@@ -57,10 +60,11 @@ _cd_cache: Dict[str, Dict[str, float]] = {
     "pk": {},
     "suo": {},
     "fuck": {},
-}
+}  # 模块级 CD 缓存，跨所有 Command 实例共享
 
 
 def _check_cd(cd_type: str, uid: str, cd_time: int) -> Tuple[bool, float]:
+    """检查冷却：返回 (是否允许, 剩余秒数) """
     cache = _cd_cache[cd_type]
     last_time = cache.get(uid, 0)
     elapsed = time.time() - last_time
@@ -68,19 +72,30 @@ def _check_cd(cd_type: str, uid: str, cd_time: int) -> Tuple[bool, float]:
 
 
 def _update_cd(cd_type: str, uid: str) -> None:
+    """更新冷却时间"""
     _cd_cache[cd_type][uid] = time.time()
 
 
 def _delete_cd(cd_type: str, uid: str) -> None:
+    """删除冷却记录"""
     _cd_cache[cd_type].pop(uid, None)
 
 
 def _get_random_num() -> float:
+    """生成随机增量：90%概率 0~1，10%概率 1~2"""
     rand = random.random()
     return round(random.uniform(0, 1) if rand > 0.1 else random.uniform(1, 2), 3)
 
 
 def _extract_ats(seg) -> list[str]:
+    """递归遍历 Seg 树，提取所有被 @ 的 QQ 号
+
+    三层 fallback：
+      1. Seg type="at"/"mention_bot" -> 直接取 data（适配未来新适配器）
+      2. Seg type="text" 中 @<nickname:user_id> 格式（旧适配器将 @ 转为 text）
+      3. raw_message 中 @ + CQ 码格式（见 _parse_at）
+    """
+    logger.debug(f"[_extract_ats] seg type={getattr(seg, 'type', None)}, data={repr(getattr(seg, 'data', None))}")
     try:
         if seg is None:
             return []
@@ -105,6 +120,13 @@ def _extract_ats(seg) -> list[str]:
 
 
 def _parse_at(cmd: BaseCommand) -> Optional[str]:
+    """从消息中提取被 @ 的 QQ 号
+
+    优先级：Seg 树 → raw_message CQ 码格式 → raw_message 文本格式
+    MaiBot 的 Command 匹配机制使用 processed_plain_text，
+    command_pattern 不带 $ 锚点以允许 @<...> 后缀存在。
+    """
+    logger.debug(f"[_parse_at] raw_message={repr(getattr(cmd.message, 'raw_message', None))}")
     try:
         seg = cmd.message.message_segment
         ats = _extract_ats(seg)
@@ -114,13 +136,19 @@ def _parse_at(cmd: BaseCommand) -> Optional[str]:
         pass
     raw = getattr(cmd.message, "raw_message", None)
     if raw:
-        m = re.search(r"@(\d+)", raw)
+        m = re.search(r"@(\d+)|\[CQ:at,qq=(\d+)\]", raw)
         if m:
-            return m.group(1)
+            return m.group(1) or m.group(2)
     return None
 
 
 def _stream_id(cmd: BaseCommand) -> Optional[str]:
+    """安全获取 chat_stream.stream_id，三阶 fallback：
+    1. cmd.chat_stream
+    2. cmd.message.chat_stream
+    3. None
+    BaseCommand 的 send_text/send_image 依赖此 ID，但旧 API 未必保障存在。
+    """
     chat_stream = getattr(cmd, 'chat_stream', None)
     if chat_stream is None:
         message_obj = getattr(cmd, 'message', None)
@@ -132,6 +160,7 @@ def _stream_id(cmd: BaseCommand) -> Optional[str]:
 
 
 async def _send_text(cmd: BaseCommand, text: str) -> bool:
+    """通过 send_api 直调发送文本，不依赖 BaseCommand.send_text"""
     sid = _stream_id(cmd)
     if not sid:
         logger.error("_send_text: stream_id not found")
@@ -140,6 +169,9 @@ async def _send_text(cmd: BaseCommand, text: str) -> bool:
 
 
 async def _send_image(cmd: BaseCommand, image_base64: str) -> bool:
+    """通过 send_api 直调发送图片（Base64），不依赖 BaseCommand.send_image
+    image_base64 为无头 Base64 字符串（不含 data:image/png;base64, 前缀）
+    """
     sid = _stream_id(cmd)
     if not sid:
         logger.error("_send_image: stream_id not found")
@@ -148,24 +180,27 @@ async def _send_image(cmd: BaseCommand, image_base64: str) -> bool:
 
 
 def _get_jj_variable(config_str: str) -> str:
+    """从配置的逗号分隔列表中随机返回一个牛牛变量名"""
     parts = [p.strip() for p in config_str.split(",") if p.strip()]
     return choice(parts) if parts else "牛子"
 
 
 def _get_ban_id_set(config_str: str) -> set:
+    """解析白名单配置字符串为集合"""
     if not config_str:
         return set()
     return set(x.strip() for x in config_str.split(",") if x.strip())
 
 
 def _get_db_path(config_getter) -> str:
+    """获取数据库路径，默认 data/impart.db"""
     return config_getter("plugin.db_path", "data/impart.db")
 
 
 class HelpCommand(BaseCommand):
     command_name = "help"
     command_description = "银趴帮助 - 显示使用说明"
-    command_pattern = r"^(银趴|impart)(介绍|帮助)$"
+    command_pattern = r"^(银趴|impart)(介绍|帮助)"
 
     async def execute(self) -> Tuple[bool, Optional[str], bool]:
         usage_text = (
@@ -198,11 +233,11 @@ class HelpCommand(BaseCommand):
 class QueryCommand(BaseCommand):
     command_name = "query"
     command_description = "查询 - 查询用户牛子长度"
-    command_pattern = r"^查询(\s+@?(?P<target>\d+))?$"
+    command_pattern = r"^查询"
 
     async def execute(self) -> Tuple[bool, Optional[str], bool]:
         db_path = _get_db_path(self.get_config)
-        target_str = self.matched_groups.get("target")
+        target_str = _parse_at(self)
         target_uid = int(target_str) if target_str else int(_uid(self))
         pronoun = "你" if str(target_uid) == _uid(self) else "TA"
         jj_var = _get_jj_variable(self.get_config("plugin.jj_variable", "牛子,牛牛,newnew"))
@@ -232,7 +267,7 @@ class QueryCommand(BaseCommand):
 class JjRankCommand(BaseCommand):
     command_name = "jjrank"
     command_description = "jj排行榜 - 查看牛子排行榜"
-    command_pattern = r"^(jj|牛牛)(排行榜|排名|榜单|rank)$"
+    command_pattern = r"^(jj|牛牛)(排行榜|排名|榜单|rank)"
 
     async def execute(self) -> Tuple[bool, Optional[str], bool]:
         db_path = _get_db_path(self.get_config)
@@ -271,11 +306,11 @@ class JjRankCommand(BaseCommand):
 class InjectionQueryCommand(BaseCommand):
     command_name = "injection_query"
     command_description = "注入查询 - 查询被注入量"
-    command_pattern = r"^注入查询(\s+@?(?P<target>\d+))?(\s+(?P<all>历史|全部))?$"
+    command_pattern = r"^注入查询(\s+(?P<all>历史|全部))?"
 
     async def execute(self) -> Tuple[bool, Optional[str], bool]:
         db_path = _get_db_path(self.get_config)
-        target_str = self.matched_groups.get("target")
+        target_str = _parse_at(self)
         target_id = int(target_str) if target_str else int(_uid(self))
         is_all = self.matched_groups.get("all") in ("历史", "全部")
         replay1 = "该用户" if target_str else "您"
@@ -308,7 +343,7 @@ class InjectionQueryCommand(BaseCommand):
 class DajiaoCommand(BaseCommand):
     command_name = "dajiao"
     command_description = "打胶/开导 - 增加自己的牛子长度"
-    command_pattern = r"^(打胶|开导)$"
+    command_pattern = r"^(打胶|开导)"
 
     async def execute(self) -> Tuple[bool, Optional[str], bool]:
         db_path = _get_db_path(self.get_config)
@@ -357,7 +392,7 @@ class DajiaoCommand(BaseCommand):
 class SuoCommand(BaseCommand):
     command_name = "suo"
     command_description = "嗦牛子/嗦 - 增加目标用户的牛子长度"
-    command_pattern = r"^嗦(?:牛子)?(\s+@?(?P<target>\d+))?$"
+    command_pattern = r"^嗦(?:牛子)?"
 
     async def execute(self) -> Tuple[bool, Optional[str], bool]:
         db_path = _get_db_path(self.get_config)
@@ -372,7 +407,7 @@ class SuoCommand(BaseCommand):
 
         _update_cd("suo", uid_str)
 
-        target_str = self.matched_groups.get("target") or _parse_at(self)
+        target_str = _parse_at(self)
         target_id = int(target_str) if target_str else uid
         pronoun = "你" if target_id == uid else "TA"
 
@@ -410,7 +445,7 @@ class SuoCommand(BaseCommand):
 class ToggleCommand(BaseCommand):
     command_name = "toggle"
     command_description = "开启/关闭银趴 - 管理员开关impart功能"
-    command_pattern = r"^(开始|开启|关闭|禁止)(银趴|impart)$"
+    command_pattern = r"^(开始|开启|关闭|禁止)(银趴|impart)"
 
     async def execute(self) -> Tuple[bool, Optional[str], bool]:
         db_path = _get_db_path(self.get_config)
@@ -434,7 +469,7 @@ class ToggleCommand(BaseCommand):
 class PKCommand(BaseCommand):
     command_name = "pk"
     command_description = "PK/对决 - 与群友进行牛子对决"
-    command_pattern = r"^(pk|对决)(\s+@?(?P<target>\d+))?$"
+    command_pattern = r"^(pk|对决)"
 
     async def execute(self) -> Tuple[bool, Optional[str], bool]:
         db_path = _get_db_path(self.get_config)
@@ -454,7 +489,7 @@ class PKCommand(BaseCommand):
 
         _update_cd("pk", uid_str)
 
-        target_str = self.matched_groups.get("target") or _parse_at(self)
+        target_str = _parse_at(self)
         if not target_str:
             await _send_text(self, "请指定要PK的对象喵，例如: pk @用户")
             return True, "无目标", True
@@ -557,7 +592,7 @@ class PKCommand(BaseCommand):
 class YinpaCommand(BaseCommand):
     command_name = "yinpa"
     command_description = "日群友/透群友 - 透群友互动"
-    command_pattern = r"^(日|透)(群友|群主|管理)$"
+    command_pattern = r"^(日|透)(群友|群主|管理)"
 
     async def execute(self) -> Tuple[bool, Optional[str], bool]:
         db_path = _get_db_path(self.get_config)
