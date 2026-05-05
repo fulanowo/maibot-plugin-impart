@@ -88,6 +88,12 @@ def _extract_ats(seg) -> list[str]:
         d = getattr(seg, "data", None)
         if t == "at":
             return [str(d)]
+        if t == "mention_bot":
+            return [str(d)]
+        if t == "text" and isinstance(d, str):
+            m = re.search(r"@<[^:]+:(\d+)>", d)
+            if m:
+                return [m.group(1)]
         if t == "seglist" and isinstance(d, list):
             result = []
             for child in d:

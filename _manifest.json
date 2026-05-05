@@ -1,5 +1,5 @@
 {
-  "manifest_version": 1,
+  "manifest_version": 1,  //旧版本manifest_version 必须为 1
   "id": "com.maibot.impart",
   "name": "银趴插件 Impart",
   "version": "1.0.0",
@@ -10,7 +10,8 @@
   },
   "license": "MIT",
   "urls": {
-    "repository": "https://github.com/maibot/mai_plugin_impart"
+    "repository": "https://github.com/fulanowo/maibot-plugin-impart",
+    "homepage": "https://github.com/fulanowo/maibot-plugin-impart"
   },
   "host_application": {
     "min_version": "0.8.0",
@@ -20,8 +21,27 @@
     "min_version": "1.0.0",
     "max_version": "2.99.99"
   },
-  "dependencies": [],
+  "dependencies": [
+    {
+      "type": "python_package",
+      "name": "sqlalchemy",
+      "version_spec": ">=2.0.0"
+    },
+    {
+      "type": "python_package",
+      "name": "aiosqlite",
+      "version_spec": ">=0.17.0"
+    },
+    {
+      "type": "python_package",
+      "name": "Pillow",
+      "version_spec": ">=9.0.0"
+    }
+  ],
   "capabilities": ["send_message"],
+  "i18n": {
+    "default_locale": "zh-CN"
+  },
   "plugin_info": {
     "is_built_in": false,
     "plugin_type": "general",
