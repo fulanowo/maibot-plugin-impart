@@ -55,6 +55,23 @@ def _gid(cmd: BaseCommand) -> int:
         return 0
 
 
+def _get_role(cmd: BaseCommand) -> str:
+    """获取发送者在群中的角色，返回 'owner'/'admin'/'member' 或空字符串。
+
+    OneBot v11 NapCat 适配器将 sender.role 注入到 
+    message_info.additional_config["user_role"] 中。
+    """
+    try:
+        add_cfg = cmd.message.message_info.additional_config
+        if isinstance(add_cfg, dict):
+            role = add_cfg.get("user_role", "")
+            if role:
+                return str(role)
+    except Exception:
+        pass
+    return ""
+
+
 _cd_cache: Dict[str, Dict[str, float]] = {
     "dajiao": {},
     "pk": {},
@@ -449,6 +466,20 @@ class ToggleCommand(BaseCommand):
 
     async def execute(self) -> Tuple[bool, Optional[str], bool]:
         db_path = _get_db_path(self.get_config)
+        uid = _uid(self)
+
+        # 权限检查：先尝试 OneBot 原生 role（owner/admin），再兜底 admin_ids 配置
+        role = _get_role(self)
+        is_admin = role in ("owner", "admin")
+        if not is_admin:
+            admin_ids_str = self.get_config("security.admin_ids", "")
+            if admin_ids_str:
+                admin_set = _get_ban_id_set(admin_ids_str)
+                is_admin = uid in admin_set
+        if not is_admin:
+            await _send_text(self, "你没有权限使用此命令喵")
+            return True, "权限不足", True
+
         raw_message = self.message.raw_message if hasattr(self.message, "raw_message") else ""
         m = re.match(r"^(开始|开启|关闭|禁止)", raw_message)
         if not m:
@@ -746,6 +777,7 @@ class ImpartPlugin(BasePlugin):
         },
         "security": {
             "ban_id_list": ConfigField(type=str, default="", description="禁止名单（逗号分隔的QQ号）"),
+            "admin_ids": ConfigField(type=str, default="", description="管理员QQ号列表（逗号分隔），留空则仅依赖 OneBot 原生 role 判断"),
         },
         "challenge": {
             "challenge_threshold": ConfigField(type=int, default=25, description="登神挑战触发长度"),
