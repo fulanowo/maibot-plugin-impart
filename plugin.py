@@ -323,7 +323,7 @@ class JjRankCommand(BaseCommand):
 class InjectionQueryCommand(BaseCommand):
     command_name = "injection_query"
     command_description = "注入查询 - 查询被注入量"
-    command_pattern = r"^注入查询(\s+(?P<all>历史|全部))?"
+    command_pattern = r"^(注入查询|摄入查询|射入查询)(\s+(?P<all>历史|全部))?"
 
     async def execute(self) -> Tuple[bool, Optional[str], bool]:
         db_path = _get_db_path(self.get_config)
@@ -687,16 +687,18 @@ class YinpaCommand(BaseCommand):
 
         jj_length = await db.get_jj_length(db_path, uid)
         if jj_length <= 0 or (5 >= jj_length > 0 and random_nn < 0.5):
+            # 反透：uid 自己接收注入
             ejaculation = round(random.uniform(1, 100), 3)
             await db.insert_ejaculation(db_path, uid, ejaculation)
-            repo = (f"好欸！{user_nick}({uid})用时{random.randint(1, 20)}秒 \n"
-                    f"给 {user_nick}({uid}) 注入了{ejaculation}毫升的脱氧核糖核酸, "
-                    f"当日总注入量为：{await db.get_today_ejaculation_data(db_path, uid)}毫升")
+            repo = (f"好欸！然而{user_nick}({uid})反透了自己呢~\n"
+                    f"{user_nick}({uid}) 被注入了{ejaculation}毫升的脱氧核糖核酸, "
+                    f"当日总被注入量为：{await db.get_today_ejaculation_data(db_path, uid)}毫升")
         else:
+            # 正常：lucky_user 接收注入
             ejaculation = round(random.uniform(1, 100), 3)
             await db.insert_ejaculation(db_path, lucky_user, ejaculation)
             repo = (f"好欸！{user_nick}({uid})用时{random.randint(1, 20)}秒 \n"
-                    f"给 {user_nick}({uid}) 注入了{ejaculation}毫升的脱氧核糖核酸, "
+                    f"给 用户{lucky_user} 注入了{ejaculation}毫升的脱氧核糖核酸, "
                     f"当日总注入量为：{await db.get_today_ejaculation_data(db_path, lucky_user)}毫升")
 
         await _send_text(self, repo)
@@ -801,3 +803,242 @@ class ImpartPlugin(BasePlugin):
             (InitHandler.get_handler_info(), InitHandler),
             (DailyResetHandler.get_handler_info(), DailyResetHandler),
         ]
+
+
+# =============================================================================
+# maibot_sdk 新 API 实现草案（migration 后启用）
+#
+# 参考文档：
+#   - develop_doc/develop(official_document)/plugin-dev/api-reference.md
+#     → self.ctx 的 15 种能力代理（send/db/config/chat/person/logger...）
+#   - develop_doc/develop(official_document)/plugin-dev/api-components.md
+#     → @API 装饰器 + 动态 API 注册 + ctx.api.call() 跨插件调用
+#
+# 当前插件使用旧 API（src.plugin_system），迁移至 maibot_sdk 后改用下方模式。
+# =============================================================================
+"""
+from typing import Any, Dict, List, Optional
+
+from maibot_sdk import (
+    MaiBotPlugin,
+    Command,
+    Hook,
+    EventType,
+    API,
+    PluginConfigBase,
+    Field,
+)
+from maibot_sdk.types import ToolParameterInfo, ToolParamType
+
+
+# ---------------------------------------------------------------------------
+# Pydantic 配置模型（替代旧 ConfigField + config_schema 字典）
+# ---------------------------------------------------------------------------
+class ImpartPluginConfig(PluginConfigBase):
+    # 插件基本配置
+    enabled: bool = Field(default=True, description="是否启用插件")
+    db_path: str = Field(default="data/impart.db", description="数据库文件路径")
+    not_allow: str = Field(
+        default='群内还未开启impart游戏, 请管理员或群主发送"开始银趴", "禁止银趴"以开启/关闭该功能',
+        description="未开启时的提示消息",
+    )
+    jj_variable: str = Field(default="牛子,牛牛,newnew", description="牛牛变量名列表（逗号分隔）")
+    bot_name: str = Field(default="BOT", description="机器人称呼")
+
+    # CD 配置
+    dj_cd_time: int = Field(default=300, description="打胶冷却时间（秒）")
+    pk_cd_time: int = Field(default=60, description="PK冷却时间（秒）")
+    suo_cd_time: int = Field(default=300, description="嗦冷却时间（秒）")
+    fuck_cd_time: int = Field(default=3600, description="透群友冷却时间（秒）")
+    isalive: bool = Field(default=False, description="是否开启不活跃惩罚")
+
+    # 安全
+    ban_id_list: str = Field(default="", description="禁止名单（逗号分隔的QQ号）")
+    admin_ids: str = Field(default="", description="管理员QQ号列表（逗号分隔）")
+
+    # 登神挑战
+    challenge_threshold: int = Field(default=25, description="登神挑战触发长度")
+    success_threshold: int = Field(default=30, description="登神挑战完成长度")
+    fail_penalty: int = Field(default=5, description="挑战失败惩罚缩减长度")
+    win_rate_multiplier: float = Field(default=1.25, description="挑战失败胜率恢复倍率")
+
+
+# ---------------------------------------------------------------------------
+# 插件主类（替代 @register_plugin + BasePlugin）
+# ---------------------------------------------------------------------------
+class ImpartPlugin(MaiBotPlugin):
+    plugin_id: str = "com.maibot.impart"
+    config_model = ImpartPluginConfig  # 自动注入 self.config
+
+    # 声明 Python 依赖
+    python_dependencies: List[str] = ["sqlalchemy", "aiosqlite", "Pillow"]
+
+    async def on_load(self) -> None:
+        self.ctx.logger.info(f"银趴插件已加载，数据库路径: {self.config.db_path}")
+        await self._init_db()
+        self.ctx.logger.info("数据库初始化完成")
+
+    async def on_unload(self) -> None:
+        self.ctx.logger.info("银趴插件已卸载")
+
+    async def on_config_update(self, scope: str, config_data: dict, version: str) -> None:
+        self.ctx.logger.info(f"配置已更新: scope={scope}")
+
+    # ---- 数据库初始化 -------------------------------------------------------
+
+    async def _init_db(self) -> None:
+        # 仍可使用独立的 database.py（SQLAlchemy），通过 self.config.db_path 获取路径
+        # 或迁移至 self.ctx.db API：
+        #   await self.ctx.db.save(model_name="userdata", data={...})
+        #   results = await self.ctx.db.query(model_name="userdata", filters={"userid": uid})
+        #   count = await self.ctx.db.count(model_name="ejaculation_data", ...)
+        pass
+
+    # ---- 消息发送封装 -------------------------------------------------------
+
+    async def _send(self, text: str, stream_id: str) -> bool:
+        # 新 API：self.ctx.send.text() 替代 send_api.text_to_stream()
+        return await self.ctx.send.text(text=text, stream_id=stream_id)
+
+    async def _send_image(self, image_base64: str, stream_id: str) -> bool:
+        # 新 API：self.ctx.send.image() 替代 send_api.image_to_stream()
+        return await self.ctx.send.image(image_base64=image_base64, stream_id=stream_id)
+
+    # ---- 用户信息获取 -------------------------------------------------------
+
+    async def _get_uid(self, user_id: str) -> str:
+        # 新 API：self.ctx.person 替代 message.message_info.user_info
+        # return await self.ctx.person.get_value(person_id=user_id, key="user_id")
+        return user_id  # fallback
+
+    async def _get_nick(self, user_id: str) -> str:
+        # 新 API 获取用户昵称
+        # return await self.ctx.person.get_value(person_id=user_id, key="nickname")
+        return f"用户{user_id}"
+
+    async def _get_stream_id(self, group_id: str) -> Optional[str]:
+        # 新 API：self.ctx.chat.get_stream_by_group_id() 替代手动 stream_id 解析
+        stream = await self.ctx.chat.get_stream_by_group_id(group_id=group_id)
+        return stream.stream_id if stream else None
+
+    # ---- 跨插件 API / 公开接口 -----------------------------------------------
+
+    @API(
+        "get_user_stats",
+        description="获取用户牛子统计数据",
+        version="1",
+        public=True,
+    )
+    async def handle_get_user_stats(self, user_id: str, **kwargs) -> dict:
+        # 其他插件可通过 ctx.api.call("com.maibot.impart", "get_user_stats", user_id=xxx) 调用
+        return {
+            "user_id": user_id,
+            "jj_length": 0.0,  # 从数据库查询
+            "win_probability": 0.5,
+        }
+
+    # ---- 命令：打胶 ---------------------------------------------------------
+
+    @Command(
+        "dajiao",
+        description="打胶/开导 - 增加自己的牛子长度",
+    )
+    async def handle_dajiao(self, **kwargs) -> Dict[str, Any]:
+        stream_id = kwargs.get("stream_id", "")
+        # uid = kwargs.get("user_id", "0")
+        # ... 业务逻辑复用 database.py ...
+        await self._send("打胶结束喵", stream_id)
+        return {"success": True, "message": "打胶成功"}
+
+    # ---- 命令：PK -----------------------------------------------------------
+
+    @Command(
+        "pk",
+        description="PK/对决 - 与群友进行牛子对决",
+    )
+    async def handle_pk(self, target: str, **kwargs) -> Dict[str, Any]:
+        stream_id = kwargs.get("stream_id", "")
+        # ... 复用 database.py 的业务逻辑 ...
+        await self._send("对决胜利喵", stream_id)
+        return {"success": True, "message": "PK完成"}
+
+    # ---- 命令：透群友 -------------------------------------------------------
+
+    @Command(
+        "yinpa",
+        description="日群友/透群友 - 透群友互动",
+    )
+    async def handle_yinpa(self, target: Optional[str] = None, **kwargs) -> Dict[str, Any]:
+        stream_id = kwargs.get("stream_id", "")
+        # ... 复用 database.py 业务逻辑 ...
+        await self._send("好欸！", stream_id)
+        return {"success": True, "message": "透成功"}
+
+    # ---- 命令：银趴开关 -----------------------------------------------------
+
+    @Command(
+        "toggle",
+        description="开启/关闭银趴 - 管理员开关impart功能",
+    )
+    async def handle_toggle(self, **kwargs) -> Dict[str, Any]:
+        stream_id = kwargs.get("stream_id", "")
+        # ... 权限判断 + 开关逻辑 ...
+        await self._send("功能已开启喵", stream_id)
+        return {"success": True, "message": "操作成功"}
+
+    # ---- 更多命令：查询 / 排行榜 / 嗦牛子 / 注入查询 / 帮助 --------------------
+
+    @Command("query", description="查询 - 查询用户牛子长度")
+    async def handle_query(self, **kwargs) -> Dict[str, Any]:
+        ...
+
+    @Command("jjrank", description="jj排行榜 - 查看牛子排行榜")
+    async def handle_jjrank(self, **kwargs) -> Dict[str, Any]:
+        ...
+
+    @Command("suo", description="嗦牛子/嗦 - 增加目标用户的牛子长度")
+    async def handle_suo(self, **kwargs) -> Dict[str, Any]:
+        ...
+
+    @Command("injection_query", description="注入查询 - 查询被注入量")
+    async def handle_injection_query(self, **kwargs) -> Dict[str, Any]:
+        ...
+
+    @Command("help", description="银趴帮助 - 显示使用说明")
+    async def handle_help(self, **kwargs) -> Dict[str, Any]:
+        ...
+
+    # ---- 启动事件：数据库初始化 + 每日重置 ------------------------------------
+
+    @Hook(EventType.ON_START)
+    async def on_start(self, **kwargs) -> None:
+        await self._init_db()
+        self.ctx.logger.info("[maibot_sdk] 数据库初始化完成")
+
+    @Hook(EventType.ON_START)
+    async def start_daily_reset(self, **kwargs) -> None:
+        # 启动每日重置协程（逻辑同当前 DailyResetHandler）
+        # 可使用 asyncio.create_task(self._daily_loop())
+        self.ctx.logger.info("[maibot_sdk] 每日重置任务已启动")
+
+    # ---- API 注册示例：动态 API ---------------------------------------------
+
+    async def on_load(self) -> None:
+        # 动态注册 API（根据配置条件决定是否公开）
+        if self.config.isalive:
+            self.register_dynamic_api(
+                "daily_punish_stats",
+                self._handle_punish_stats,
+                description="获取每日不活跃惩罚统计",
+                version="1",
+                public=True,
+            )
+            await self.sync_dynamic_apis()
+
+    async def _handle_punish_stats(self, **kwargs) -> dict:
+        return {"punished_today": 0, "total_punished": 42}
+
+    async def on_unload(self) -> None:
+        self.clear_dynamic_apis()
+        await self.sync_dynamic_apis(offline_reason="插件已卸载")
+"""
