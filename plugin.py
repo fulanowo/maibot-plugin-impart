@@ -450,7 +450,7 @@ class SuoCommand(BaseCommand):
             await db.update_challenge_status(db_path, target_id)
             msg = (f"{pronoun}的{jj_var}很满意喵, 嗦长了{random_num}cm喵"
                    f"\n由于{pronoun}无休止的嗦与被嗦，触犯到了神秘的禁忌，{bot_name}检测到{pronoun}的{jj_var}长度超过25cm，"
-                   f"\n已为{pronoun}开启✨\"登神长阶\"✨，{pronoun}现在的获胜概率变为80%，且无法使用\"打胶\"与\"嗦\"指令，"
+                   f"\n已为{pronoun}开启✨\"登神长阶\"✨，{pronoun}现在的获胜概率变为当前的80%，且无法使用\"打胶\"与\"嗦\"指令，"
                    f"请以将{jj_var}长度提升至30cm为目标与他人pk吧！")
         else:
             msg = f"{pronoun}的{jj_var}很满意喵, 嗦长了{random_num}cm喵, 目前长度为{new_length}cm喵"
