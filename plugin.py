@@ -290,8 +290,10 @@ class JjRankCommand(BaseCommand):
         db_path = _get_db_path(self.get_config)
         uid = int(_uid(self))
         jj_var = _get_jj_variable(self.get_config("plugin.jj_variable", "牛子,牛牛,newnew"))
+        group_id = _gid(self)
+        await db.ensure_user_in_group(db_path, uid, group_id, _nick(self))
 
-        rankdata = await db.get_sorted(db_path)
+        rankdata = await db.get_sorted(db_path, group_id)
         if len(rankdata) < 5:
             await _send_text(self, "目前记录的数据量小于5, 无法显示rank喵")
             return True, "数据不足", True
@@ -309,9 +311,13 @@ class JjRankCommand(BaseCommand):
 
         data = {}
         for i, entry in enumerate(top5):
-            data[f"TOP{i+1}"] = entry["jj_length"]
+            nick = await db.get_group_nickname(db_path, entry["userid"], group_id)
+            key = nick if nick else f"用户{entry['userid']}"
+            data[key] = entry["jj_length"]
         for i, entry in enumerate(last5):
-            data[f"LAST{len(last5)-i}"] = entry["jj_length"]
+            nick = await db.get_group_nickname(db_path, entry["userid"], group_id)
+            key = nick if nick else f"用户{entry['userid']}"
+            data[key] = entry["jj_length"]
 
         img_bytes = await draw_bar_chart.draw_bar_chart(data)
         img_b64 = base64.b64encode(img_bytes).decode("utf-8")
@@ -389,6 +395,7 @@ class DajiaoCommand(BaseCommand):
             return True, "挑战中", True
 
         await db.set_jj_length(db_path, uid, random_num)
+        await db.ensure_user_in_group(db_path, uid, _gid(self), _nick(self))
         new_length = await db.get_jj_length(db_path, uid)
 
         bot_name = self.get_config("plugin.bot_name", "BOT")
@@ -443,6 +450,8 @@ class SuoCommand(BaseCommand):
             return True, "挑战中", True
 
         await db.set_jj_length(db_path, target_id, random_num)
+        await db.ensure_user_in_group(db_path, uid, _gid(self), _nick(self))
+        await db.ensure_user_in_group(db_path, target_id, _gid(self), _nick(self) if target_id == uid else f"用户{target_id}")
         new_length = await db.get_jj_length(db_path, target_id)
 
         bot_name = self.get_config("plugin.bot_name", "BOT")
@@ -552,6 +561,8 @@ class PKCommand(BaseCommand):
                 await db.set_jj_length(db_path, int(at), rn / 2)
                 msg = await self._handle_pk_loss(db_path, uid, at, length_increase, length_decrease, jj_var, bot_name)
 
+            await db.ensure_user_in_group(db_path, uid, _gid(self), _nick(self))
+            await db.ensure_user_in_group(db_path, int(at), _gid(self), f"用户{at}")
             await _send_text(self, msg)
         else:
             if not await db.is_in_table(db_path, uid):
@@ -675,6 +686,8 @@ class YinpaCommand(BaseCommand):
         await asyncio.sleep(2)
         await db.update_activity(db_path, lucky_user)
         await db.update_activity(db_path, uid)
+        await db.ensure_user_in_group(db_path, uid, group_id, user_nick)
+        await db.ensure_user_in_group(db_path, lucky_user, group_id, f"用户{lucky_user}")
 
         jj_length = await db.get_jj_length(db_path, uid)
         if jj_length <= 0 or (5 >= jj_length > 0 and random_nn < 0.5):

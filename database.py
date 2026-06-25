@@ -40,6 +40,13 @@ class EjaculationData(Base):
     volume = Column(Float, nullable=False)
 
 
+class UserGroup(Base):
+    __tablename__ = "user_group"
+    userid = Column(Integer, primary_key=True)
+    groupid = Column(Integer, primary_key=True)
+    nickname = Column(String(100), nullable=True)
+
+
 def get_engine(db_path: str):
     global _engine
     if _engine is None:
@@ -287,8 +294,47 @@ async def punish_all_inactive_users(db_path: str) -> None:
         await s.commit()
 
 
-async def get_sorted(db_path: str) -> List[Dict]:
+async def ensure_user_in_group(db_path: str, userid: int, groupid: int, nickname: str) -> None:
+    if groupid == 0:
+        return
     session_cls = get_session_cls(db_path)
     async with session_cls() as s:
-        result = await s.execute(select(UserData).order_by(UserData.jj_length.desc()))
-        return [{"userid": user.userid, "jj_length": user.jj_length} for user in result.scalars()]
+        result = await s.execute(
+            select(UserGroup).where(
+                UserGroup.userid == userid,
+                UserGroup.groupid == groupid
+            )
+        )
+        existing = result.scalar()
+        if existing:
+            if nickname:
+                existing.nickname = nickname
+        else:
+            s.add(UserGroup(userid=userid, groupid=groupid, nickname=nickname or None))
+        await s.commit()
+
+
+async def get_group_nickname(db_path: str, userid: int, groupid: int) -> Optional[str]:
+    if groupid == 0:
+        return None
+    session_cls = get_session_cls(db_path)
+    async with session_cls() as s:
+        result = await s.execute(
+            select(UserGroup.nickname).where(
+                UserGroup.userid == userid,
+                UserGroup.groupid == groupid
+            )
+        )
+        return result.scalar()
+
+
+async def get_sorted(db_path: str, group_id: int) -> List[Dict]:
+    session_cls = get_session_cls(db_path)
+    async with session_cls() as s:
+        subquery = select(UserGroup.userid).where(UserGroup.groupid == group_id)
+        result = await s.execute(
+            select(UserData.userid, UserData.jj_length)
+            .where(UserData.userid.in_(subquery))
+            .order_by(UserData.jj_length.desc())
+        )
+        return [{"userid": row.userid, "jj_length": row.jj_length} for row in result]
