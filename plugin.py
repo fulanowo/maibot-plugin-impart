@@ -655,31 +655,22 @@ class YinpaCommand(BaseCommand):
         random_nn = random.uniform(0, 1)
         at_target = _parse_at(self)
 
-        if command_type == "群友":
-            if at_target:
-                lucky_user = int(at_target)
-                await _send_text(self, f"现在咱将把目标\n送给{user_nick}色色！")
-            else:
-                lucky_user = uid
-                jj_len = await db.get_jj_length(db_path, uid)
-                if jj_len > 5:
-                    await _send_text(self, f"现在咱将随机抽取一位幸运群友\n送给{user_nick}色色！\n（使用@指定目标效果更佳）")
-                elif 5 >= jj_len > 0:
-                    if random_nn < 0.5:
-                        await _send_text(self, f"{bot_name}发现你是xnn~现在咱将{user_nick}\n送给随机一位幸运群友色色！\n（使用@指定目标）")
-                    else:
-                        await _send_text(self, f"现在咱将随机抽取一位幸运群友\n送给{user_nick}色色！\n（使用@指定目标）")
-                else:
-                    await _send_text(self, f"唔...你透不了哦~\n现在咱将{user_nick}\n送给随机一位幸运群友色色！\n（使用@指定目标）")
-                return True, "需指定目标", True
+        if at_target:
+            lucky_user = int(at_target)
+            await _send_text(self, f"现在咱将把目标\n送给{user_nick}色色！")
         else:
-            if at_target:
-                lucky_user = int(at_target)
-                role_name = "群主" if command_type == "群主" else "管理"
-                await _send_text(self, f"现在咱将把{role_name}\n送给{user_nick}色色！")
+            lucky_user = uid
+            jj_len = await db.get_jj_length(db_path, uid)
+            if jj_len > 5:
+                await _send_text(self, f"现在咱将随机抽取一位幸运群友\n送给{user_nick}色色！\n（使用@指定目标效果更佳）")
+            elif 5 >= jj_len > 0:
+                if random_nn < 0.5:
+                    await _send_text(self, f"{bot_name}发现你是xnn~现在咱将{user_nick}\n送给随机一位幸运群友色色！\n（使用@指定目标）")
+                else:
+                    await _send_text(self, f"现在咱将随机抽取一位幸运群友\n送给{user_nick}色色！\n（使用@指定目标）")
             else:
-                await _send_text(self, f"无法确定{'群主' if command_type == '群主' else '管理'}身份，请@指定目标喵")
-                return True, "需指定目标", True
+                await _send_text(self, f"唔...你透不了哦~\n现在咱将{user_nick}\n送给随机一位幸运群友色色！\n（使用@指定目标）")
+            return True, "需指定目标", True
 
         await asyncio.sleep(2)
         await db.update_activity(db_path, lucky_user)
