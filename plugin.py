@@ -1,3 +1,13 @@
+"""
+MaiBot 银趴插件 (maibot-plugin-impart)
+
+从 nonebot-plugin-impart 移植至 MaiBot 平台。
+使用旧版 API (src.plugin_system)，适配 MaiBot 0.12.0 ~ 0.12.3。
+
+包含 9 个命令组件 (Help/Query/JjRank/InjectionQuery/Dajiao/Suo/Toggle/PK/Yinpa)
+和 2 个事件处理器 (InitHandler/DailyResetHandler)。
+"""
+
 import asyncio
 import base64
 import os
@@ -9,7 +19,7 @@ from datetime import datetime, timedelta
 from random import choice
 from typing import Any, ClassVar, Dict, List, Optional, Tuple, Type
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # 确保插件目录在 sys.path 中，避免 ModuleNotFoundError
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from src.plugin_system import (
     BasePlugin,
@@ -215,6 +225,8 @@ def _get_db_path(config_getter) -> str:
 
 
 class HelpCommand(BaseCommand):
+    """显示银趴插件的完整命令列表和使用说明"""
+
     command_name = "help"
     command_description = "银趴帮助 - 显示使用说明"
     command_pattern = r"^(银趴|impart)(介绍|帮助)"
@@ -248,6 +260,10 @@ class HelpCommand(BaseCommand):
 
 
 class QueryCommand(BaseCommand):
+    """查询用户牛子长度，支持 @ 指定目标；未 @ 时查自己。
+    根据长度返回 5 段判定：神/正常/xnn/快变成女孩子/已经是女孩子
+    """
+
     command_name = "query"
     command_description = "查询 - 查询用户牛子长度"
     command_pattern = r"^查询"
@@ -282,6 +298,11 @@ class QueryCommand(BaseCommand):
 
 
 class JjRankCommand(BaseCommand):
+    """展示牛牛排行榜（前 5 / 后 5），分群过滤并显示群昵称。
+    图例显示 user_group 表中记录的群昵称，无昵称时兜底显示 QQ 号。
+    数据量 < 5 时提示无法显示。
+    """
+
     command_name = "jjrank"
     command_description = "jj排行榜 - 查看牛子排行榜"
     command_pattern = r"^(jj|牛牛)(排行榜|排名|榜单|rank)"
@@ -327,6 +348,11 @@ class JjRankCommand(BaseCommand):
 
 
 class InjectionQueryCommand(BaseCommand):
+    """查询被注入量（ml），支持当日查询和历史折线图。
+    别名：注入查询 / 摄入查询 / 射入查询
+    后接"历史"/"全部"查看含折线图的历史总量统计。
+    """
+
     command_name = "injection_query"
     command_description = "注入查询 - 查询被注入量"
     command_pattern = r"^(注入查询|摄入查询|射入查询)(\s+(?P<all>历史|全部))?"
@@ -364,6 +390,11 @@ class InjectionQueryCommand(BaseCommand):
 
 
 class DajiaoCommand(BaseCommand):
+    """打胶/开导 - 增加自己的牛子长度。
+    有独立 CD（默认 300s）。挑战中（25~30cm）禁止使用。
+    达到 25cm 触发登神挑战。
+    """
+
     command_name = "dajiao"
     command_description = "打胶/开导 - 增加自己的牛子长度"
     command_pattern = r"^(打胶|开导)"
@@ -414,6 +445,10 @@ class DajiaoCommand(BaseCommand):
 
 
 class SuoCommand(BaseCommand):
+    """嗦牛子/嗦 - 增加 @ 用户的牛子长度（未 @ 则为自己）。
+    有独立 CD（默认 300s）。目标处于挑战中时禁止使用。
+    """
+
     command_name = "suo"
     command_description = "嗦牛子/嗦 - 增加目标用户的牛子长度"
     command_pattern = r"^嗦(?:牛子)?"
@@ -469,6 +504,10 @@ class SuoCommand(BaseCommand):
 
 
 class ToggleCommand(BaseCommand):
+    """开启/关闭银趴功能，需要群主/管理员权限。
+    权限检查：优先 NapCat 适配器注入的 user_role，兜底 security.admin_ids 配置。
+    """
+
     command_name = "toggle"
     command_description = "开启/关闭银趴 - 管理员开关impart功能"
     command_pattern = r"^(开始|开启|关闭|禁止)(银趴|impart)"
@@ -477,7 +516,6 @@ class ToggleCommand(BaseCommand):
         db_path = _get_db_path(self.get_config)
         uid = _uid(self)
 
-        # 权限检查：先尝试 OneBot 原生 role（owner/admin），再兜底 admin_ids 配置
         role = _get_role(self)
         is_admin = role in ("owner", "admin")
         if not is_admin:
@@ -507,6 +545,13 @@ class ToggleCommand(BaseCommand):
 
 
 class PKCommand(BaseCommand):
+    """
+    PK/对决 - 与 @ 用户进行牛子对决。
+    胜率系统：初始 50%，胜方 -1%、败方 +1%。
+    胜利方获得 rn/2 增长，失败方 -rn 缩减。
+    触发登神挑战状态变化时输出对应提示。
+    """
+
     command_name = "pk"
     command_description = "PK/对决 - 与群友进行牛子对决"
     command_pattern = r"^(pk|对决)"
@@ -632,6 +677,15 @@ class PKCommand(BaseCommand):
 
 
 class YinpaCommand(BaseCommand):
+    """
+    日群友/透群友 - 透群友互动，支持短命令格式 日/透@用户。
+    无 @ 时按长度段处理：
+      >5cm  → 提示使用 @ 指定目标
+      xnn   → 50% 概率触发反透自注入
+      ≤0    → 直接反透
+    反透时 uid 自己接收注入，正常透时 lucky_user 接收注入。
+    """
+
     command_name = "yinpa"
     command_description = "日群友/透群友 - 透群友互动"
     command_pattern = r"^(日|透)(?:群友|群主|管理)?"
@@ -712,6 +766,8 @@ class YinpaCommand(BaseCommand):
 
 
 class InitHandler(BaseEventHandler):
+    """MaiBot 启动时自动初始化数据库表结构和列迁移"""
+
     event_type = EventType.ON_START
     handler_name = "impart_init_handler"
     handler_description = "启动时初始化数据库"
@@ -727,6 +783,11 @@ class InitHandler(BaseEventHandler):
 
 
 class DailyResetHandler(BaseEventHandler):
+    """启动时创建每日不活跃惩罚定时协程。
+    通过 asyncio.create_task 启动后台循环，每天 0 点执行一次 punish_all_inactive_users。
+    isalive=false 时跳过惩罚（仍有循环消耗，但跳过数据库操作）。
+    """
+
     event_type = EventType.ON_START
     handler_name = "impart_daily_reset_handler"
     handler_description = "启动每日不活跃惩罚定时任务"
