@@ -9,6 +9,8 @@
     "url": "https://github.com/maibot"
   },
   "license": "MIT",
+  "categories": ["Entertainment & Interaction"],
+  "keywords": ["银趴", "impart", "PK", "打胶", "排行榜", "牛子"],
   "urls": {
     "repository": "https://github.com/fulanowo/maibot-plugin-impart",
     "homepage": "https://github.com/fulanowo/maibot-plugin-impart"
