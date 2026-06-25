@@ -14,8 +14,8 @@
     "homepage": "https://github.com/fulanowo/maibot-plugin-impart"
   },
   "host_application": {
-    "min_version": "0.8.0",
-    "max_version": "9.9.9"
+    "min_version": "0.12.0",
+    "max_version": "0.12.3"
   },
   "sdk": {
     "min_version": "1.0.0",
@@ -91,8 +91,8 @@
       {
         "type": "command",
         "name": "yinpa",
-        "description": "日群友/透群友/日群主/日管理 - 透群友互动",
-        "pattern": "^(日|透)(群友|群主|管理)"
+        "description": "日群友/透群友/日群主/日管理/日@用户/透@用户 - 透群友互动",
+        "pattern": "^(日|透)(?:群友|群主|管理)?"
       },
       {
         "type": "command",

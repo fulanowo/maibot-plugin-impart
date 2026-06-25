@@ -634,7 +634,7 @@ class PKCommand(BaseCommand):
 class YinpaCommand(BaseCommand):
     command_name = "yinpa"
     command_description = "日群友/透群友 - 透群友互动"
-    command_pattern = r"^(日|透)(群友|群主|管理)"
+    command_pattern = r"^(日|透)(?:群友|群主|管理)?"
 
     async def execute(self) -> Tuple[bool, Optional[str], bool]:
         db_path = _get_db_path(self.get_config)
@@ -656,10 +656,9 @@ class YinpaCommand(BaseCommand):
             return True, "CD中", True
 
         raw_message = self.message.raw_message if hasattr(self.message, "raw_message") else ""
-        command_match = re.match(r"^(日|透)(群友|群主|管理)", raw_message)
+        command_match = re.match(r"^(日|透)(?:群友|群主|管理)?", raw_message)
         if not command_match:
             return True, "无法解析命令", True
-        command_type = command_match.group(2)
         user_nick = _nick(self) or f"用户{uid}"
 
         random_nn = random.uniform(0, 1)
