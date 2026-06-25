@@ -654,7 +654,6 @@ class YinpaCommand(BaseCommand):
         if not cd_allowed:
             await _send_text(self, f"你已经榨不出来任何东西了, 请先休息{round(remaining, 3)}秒")
             return True, "CD中", True
-        _update_cd("fuck", uid_str)
 
         raw_message = self.message.raw_message if hasattr(self.message, "raw_message") else ""
         command_match = re.match(r"^(日|透)(群友|群主|管理)", raw_message)
@@ -666,22 +665,22 @@ class YinpaCommand(BaseCommand):
         random_nn = random.uniform(0, 1)
         at_target = _parse_at(self)
 
-        if at_target:
-            lucky_user = int(at_target)
-            await _send_text(self, f"现在咱将把目标\n送给{user_nick}色色！")
-        else:
-            lucky_user = uid
+        if not at_target:
             jj_len = await db.get_jj_length(db_path, uid)
             if jj_len > 5:
-                await _send_text(self, f"现在咱将随机抽取一位幸运群友\n送给{user_nick}色色！\n（使用@指定目标效果更佳）")
+                await _send_text(self, "请使用@指定目标喵")
             elif 5 >= jj_len > 0:
                 if random_nn < 0.5:
-                    await _send_text(self, f"{bot_name}发现你是xnn~现在咱将{user_nick}\n送给随机一位幸运群友色色！\n（使用@指定目标）")
+                    await _send_text(self, f"{bot_name}发现你是xnn~现在咱将{user_nick}\n送给随机一位幸运群友色色！")
                 else:
-                    await _send_text(self, f"现在咱将随机抽取一位幸运群友\n送给{user_nick}色色！\n（使用@指定目标）")
+                    await _send_text(self, "请使用@指定目标喵")
             else:
-                await _send_text(self, f"唔...你透不了哦~\n现在咱将{user_nick}\n送给随机一位幸运群友色色！\n（使用@指定目标）")
+                await _send_text(self, "唔...你透不了哦~")
             return True, "需指定目标", True
+
+        _update_cd("fuck", uid_str)
+        lucky_user = int(at_target)
+        await _send_text(self, f"现在咱将把目标\n送给{user_nick}色色！")
 
         await asyncio.sleep(2)
         await db.update_activity(db_path, lucky_user)
