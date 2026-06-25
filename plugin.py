@@ -342,7 +342,7 @@ class InjectionQueryCommand(BaseCommand):
             for item in data:
                 ejaculation += item["volume"]
                 inject_data[item["date"]] = item["volume"]
-            if len(inject_data) < 2:
+            if len(inject_data) < 1:
                 await _send_text(self, f"{replay1}历史总被注射量为{ejaculation}ml")
                 return True, "查询成功", True
 

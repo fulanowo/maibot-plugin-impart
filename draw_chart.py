@@ -118,6 +118,23 @@ class DrawBarChart:
     async def draw_line_chart(self, data: Dict[str, float]) -> bytes:
         values = list(data.values())
         keys = list(data.keys())
+
+        if len(values) == 1:
+            image = Image.new("RGBA", (1920, 1080), (255, 255, 255, 255))
+            draw = ImageDraw.Draw(image)
+            draw.line((490, 540, 1800, 540), fill="black", width=2)
+            draw.line((500, 50, 500, 1030), fill="black", width=2)
+            x_center = 960
+            y = 540
+            draw.ellipse((x_center - 8, y - 8, x_center + 8, y + 8), fill="black", width=2)
+            draw.text((x_center - 20, y - 40), f"{values[0]}ml", fill="black",
+                      font=ImageFont.truetype(self.font, 32))
+            draw.text((50, 60), f"{keys[0]}   {values[0]}ml", fill="black",
+                      font=ImageFont.truetype(self.font, 34))
+            bytes_io = BytesIO()
+            image.save(bytes_io, format="PNG")
+            return bytes_io.getvalue()
+
         image = Image.new("RGBA", (1920, 1080), (255, 255, 255, 255))
         draw = ImageDraw.Draw(image)
 

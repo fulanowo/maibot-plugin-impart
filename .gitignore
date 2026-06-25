@@ -30,3 +30,6 @@ Thumbs.db
 # Plugin generated
 my_plugin/config.toml
 my_plugin/data/
+
+
+TEST_CASES.md
