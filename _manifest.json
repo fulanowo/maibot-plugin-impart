@@ -1,8 +1,8 @@
 {
-  "manifest_version": 1,  //旧版本manifest_version 必须为 1
+  "manifest_version": 1,
   "id": "com.maibot.impart",
   "name": "银趴插件 Impart",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "MaiBot 银趴插件，包含PK、打胶、嗦牛子、查询、排行榜、透群友等功能",
   "author": {
     "name": "mai_plugin_impart",
@@ -48,48 +48,69 @@
     "components": [
       {
         "type": "command",
-        "name": "pk",
-        "description": "PK/对决 - 与群友进行牛子对决"
-      },
-      {
-        "type": "command",
-        "name": "dajiao",
-        "description": "打胶/开导 - 增加自己的牛子长度"
-      },
-      {
-        "type": "command",
-        "name": "suo",
-        "description": "嗦牛子/嗦 - 增加目标用户的牛子长度"
+        "name": "help",
+        "description": "银趴帮助 - 显示使用说明",
+        "pattern": "^(银趴|impart)(介绍|帮助)"
       },
       {
         "type": "command",
         "name": "query",
-        "description": "查询 - 查询用户牛子长度"
+        "description": "查询 - 查询用户牛子长度",
+        "pattern": "^查询"
       },
       {
         "type": "command",
         "name": "jjrank",
-        "description": "jj排行榜 - 查看牛子排行榜"
-      },
-      {
-        "type": "command",
-        "name": "yinpa",
-        "description": "日群友/透群友 - 透群友互动"
-      },
-      {
-        "type": "command",
-        "name": "toggle",
-        "description": "开启/关闭银趴 - 管理员开关impart功能"
+        "description": "jj排行榜 - 查看牛子排行榜（分群过滤，图例显示昵称）",
+        "pattern": "^(jj|牛牛)(排行榜|排名|榜单|rank)"
       },
       {
         "type": "command",
         "name": "injection_query",
-        "description": "注入查询 - 查询被注入量"
+        "description": "注入查询 - 查询被注入量（后接历史/全部查看折线图）",
+        "pattern": "^(注入查询|摄入查询|射入查询)(\\s+(?P<all>历史|全部))?"
       },
       {
         "type": "command",
-        "name": "help",
-        "description": "银趴帮助 - 显示使用说明"
+        "name": "dajiao",
+        "description": "打胶/开导 - 增加自己的牛子长度",
+        "pattern": "^(打胶|开导)"
+      },
+      {
+        "type": "command",
+        "name": "suo",
+        "description": "嗦牛子/嗦 - 增加目标用户的牛子长度",
+        "pattern": "^嗦(?:牛子)?"
+      },
+      {
+        "type": "command",
+        "name": "pk",
+        "description": "PK/对决 - 与群友进行牛子对决",
+        "pattern": "^(pk|对决)"
+      },
+      {
+        "type": "command",
+        "name": "yinpa",
+        "description": "日群友/透群友/日群主/日管理 - 透群友互动",
+        "pattern": "^(日|透)(群友|群主|管理)"
+      },
+      {
+        "type": "command",
+        "name": "toggle",
+        "description": "开启/关闭银趴 - 管理员开关impart功能",
+        "pattern": "^(开始|开启|关闭|禁止)(银趴|impart)"
+      },
+      {
+        "type": "event_handler",
+        "name": "impart_init_handler",
+        "description": "启动时初始化数据库",
+        "event_type": "ON_START"
+      },
+      {
+        "type": "event_handler",
+        "name": "impart_daily_reset_handler",
+        "description": "启动每日不活跃惩罚定时任务",
+        "event_type": "ON_START"
       }
     ]
   }
