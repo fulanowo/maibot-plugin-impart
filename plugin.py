@@ -669,18 +669,22 @@ class YinpaCommand(BaseCommand):
             jj_len = await db.get_jj_length(db_path, uid)
             if jj_len > 5:
                 await _send_text(self, "请使用@指定目标喵")
+                return True, "需指定目标", True
             elif 5 >= jj_len > 0:
                 if random_nn < 0.5:
                     await _send_text(self, f"{bot_name}发现你是xnn~现在咱将{user_nick}\n送给随机一位幸运群友色色！")
+                    # xnn + no @: 落到下方执行反透
                 else:
                     await _send_text(self, "请使用@指定目标喵")
-            else:
-                await _send_text(self, "唔...你透不了哦~")
-            return True, "需指定目标", True
+                    return True, "需指定目标", True
+            # jj_len <= 0, no @: 落到下方执行反透
 
         _update_cd("fuck", uid_str)
-        lucky_user = int(at_target)
-        await _send_text(self, f"现在咱将把目标\n送给{user_nick}色色！")
+        if at_target:
+            lucky_user = int(at_target)
+            await _send_text(self, f"现在咱将把目标\n送给{user_nick}色色！")
+        else:
+            lucky_user = uid
 
         await asyncio.sleep(2)
         await db.update_activity(db_path, lucky_user)
