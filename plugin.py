@@ -232,14 +232,15 @@ class HelpCommand(BaseCommand):
     command_pattern = r"^(银趴|impart)(介绍|帮助)"
 
     async def execute(self) -> Tuple[bool, Optional[str], bool]:
+        threshold = self.get_config("challenge.challenge_threshold", 25)
         usage_text = (
             "impart功能说明:\n"
-            "[日群友|透群友|日群主|透群主|日管理|透管理]\n"
-            "字面意思,使用<透群友>时可@用户\n"
+            "[日/透]\n"
+            "使用<日/透@用户>与群友互动\n"
             "[pk|对决]\n"
             "通过random实现pk,胜方获取败方随机数/2的牛牛长度;\n"
             "初始胜率为50%,pk后胜方胜率-1%,败方胜率+1%\n"
-            "<牛牛长度超过25时会触发神秘任务>\n"
+            f"<牛牛长度超过{threshold}时会触发神秘任务>\n"
             "[打胶|开导]\n"
             "增加自己长度\n"
             "[嗦牛子|嗦]\n"
