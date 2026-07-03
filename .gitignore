@@ -30,3 +30,6 @@ Thumbs.db
 
 
 TEST_CASES.md
+
+# Git worktrees
+.worktrees/
