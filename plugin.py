@@ -10,18 +10,15 @@ import base64
 import os
 import random
 import re
-import sys
 import time
 from datetime import datetime, timedelta
 from random import choice
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
 from maibot_sdk import Command, EventHandler, Field, MaiBotPlugin, PluginConfigBase
 from maibot_sdk.types import EventType
 
-import database as db
-from draw_chart import draw_bar_chart
+from . import database as db
+from .draw_chart import draw_bar_chart
 
 
 _cd_cache = {
@@ -76,6 +73,7 @@ class PluginSectionConfig(PluginConfigBase):
     )
     jj_variable: str = Field(default="牛子,牛牛,newnew", description="牛牛变量名列表（逗号分隔）")
     bot_name: str = Field(default="BOT", description="机器人称呼")
+    db_path: str = Field(default="data/impart.db", description="数据库文件路径（相对于插件目录或绝对路径）")
 
 
 class CommandsSectionConfig(PluginConfigBase):
@@ -121,8 +119,9 @@ class ImpartPlugin(MaiBotPlugin):
     config_model = ImpartPluginConfig
 
     async def on_load(self) -> None:
-        # ponytail: ctx.paths 在安装的 SDK 版本中未实现，用 __file__ 定位插件目录
-        self._db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "impart.db")
+        self._db_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), self.config.plugin.db_path
+        )
         try:
             await db.init_db(self._db_path)
             self.ctx.logger.info("数据库初始化完成: %s", self._db_path)
@@ -740,6 +739,12 @@ class ImpartPlugin(MaiBotPlugin):
                 else:
                     await self.ctx.send.text("请使用@指定目标喵", stream_id)
                     return True, "需指定目标", 2
+
+        if at_target:
+            ban_ids = _get_ban_id_set(self.config.security.ban_id_list)
+            if at_target in ban_ids:
+                await self.ctx.send.text("该用户无法被透喵", stream_id)
+                return True, "白名单用户", 2
 
         _update_cd("fuck", uid_str)
         if at_target:

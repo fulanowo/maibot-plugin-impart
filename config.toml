@@ -18,6 +18,9 @@ jj_variable = "牛子,牛牛,newnew"
 # 机器人称呼
 bot_name = "BOT"
 
+# 数据库文件路径（相对于插件目录或绝对路径）
+db_path = "data/impart.db"
+
 
 # 命令配置（CD 时间等）
 [commands]
