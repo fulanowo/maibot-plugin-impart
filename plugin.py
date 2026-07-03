@@ -68,6 +68,7 @@ class PluginSectionConfig(PluginConfigBase):
     __ui_icon__ = "package"
     __ui_order__ = 0
 
+    config_version: str = Field(default="1.0.0", description="配置文件版本号")
     enabled: bool = Field(default=True, description="是否启用插件")
     not_allow: str = Field(
         default='群内还未开启impart游戏, 请管理员或群主发送"开始银趴", "禁止银趴"以开启/关闭该功能',
@@ -120,7 +121,8 @@ class ImpartPlugin(MaiBotPlugin):
     config_model = ImpartPluginConfig
 
     async def on_load(self) -> None:
-        self._db_path = str(self.ctx.paths.data_dir / "impart.db")
+        # ponytail: ctx.paths 在安装的 SDK 版本中未实现，用 __file__ 定位插件目录
+        self._db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "impart.db")
         try:
             await db.init_db(self._db_path)
             self.ctx.logger.info("数据库初始化完成: %s", self._db_path)
@@ -174,6 +176,18 @@ class ImpartPlugin(MaiBotPlugin):
             pass
         return ""
 
+    def _parse_at_target(self, kwargs):
+        """从 raw_message 段提取第一个 @ 目标的 user_id。"""
+        msg = kwargs.get("message", {})
+        raw = msg.get("raw_message", [])
+        for seg in raw:
+            if isinstance(seg, dict) and seg.get("type") == "at":
+                data = seg.get("data", {}) if isinstance(seg.get("data"), dict) else {}
+                uid = str(data.get("target_user_id", "") or "")
+                if uid:
+                    return uid
+        return None
+
     async def _daily_loop(self):
         while True:
             now = datetime.now()
@@ -225,11 +239,11 @@ class ImpartPlugin(MaiBotPlugin):
     @Command(
         "query",
         description="查询 - 查询用户牛子长度",
-        pattern=r"^查询(\s+@?(?P<target>\d+))?$",
+        pattern=r"^查询(\s*@[^\s]+)?\s*$",
     )
     async def handle_query(self, **kwargs):
-        target_str = kwargs.get("matched_groups", {}).get("target")
-        target_uid = int(target_str) if target_str else int(self._get_user_id(kwargs))
+        at_target = self._parse_at_target(kwargs)
+        target_uid = int(at_target) if at_target else int(self._get_user_id(kwargs))
         pronoun = "你" if str(target_uid) == self._get_user_id(kwargs) else "TA"
         jj_var = _get_jj_variable(self.config.plugin.jj_variable)
         stream_id = kwargs["stream_id"]
@@ -318,11 +332,11 @@ class ImpartPlugin(MaiBotPlugin):
         pattern=r"^(注入查询|摄入查询|射入查询)(\s+(?P<all>历史|全部))?$",
     )
     async def handle_injection_query(self, **kwargs):
-        target_str = kwargs.get("matched_groups", {}).get("target")
-        target_id = int(target_str) if target_str else int(self._get_user_id(kwargs))
+        at_target = self._parse_at_target(kwargs)
+        target_id = int(at_target) if at_target else int(self._get_user_id(kwargs))
         matched = kwargs.get("matched_groups", {})
         is_all = matched.get("all") in ("历史", "全部")
-        replay1 = "该用户" if target_str else "您"
+        replay1 = "该用户" if at_target else "您"
         stream_id = kwargs["stream_id"]
         group_id = self._get_group_id(kwargs)
 
@@ -425,7 +439,7 @@ class ImpartPlugin(MaiBotPlugin):
     @Command(
         "suo",
         description="嗦牛子/嗦 - 增加目标用户的牛子长度",
-        pattern=r"^嗦(?:牛子)?(\s+@?(?P<target>\d+))?$",
+        pattern=r"^嗦(?:牛子)?(\s*@[^\s]+)?\s*$",
     )
     async def handle_suo(self, **kwargs):
         uid_str = self._get_user_id(kwargs)
@@ -448,8 +462,8 @@ class ImpartPlugin(MaiBotPlugin):
 
         _update_cd("suo", uid_str)
 
-        target_str = kwargs.get("matched_groups", {}).get("target")
-        target_id = int(target_str) if target_str else uid
+        at_target = self._parse_at_target(kwargs)
+        target_id = int(at_target) if at_target else uid
         pronoun = "你" if target_id == uid else "TA"
 
         if not await db.is_in_table(self._db_path, target_id):
@@ -516,8 +530,8 @@ class ImpartPlugin(MaiBotPlugin):
             await self.ctx.send.text("你没有权限使用此命令喵", stream_id)
             return True, "权限不足", 2
 
-        raw_message = kwargs.get("raw_message", "")
-        m = re.match(r"^(开始|开启|关闭|禁止)", raw_message)
+        text = kwargs.get("text", "")
+        m = re.match(r"^(开始|开启|关闭|禁止)", text)
         if not m:
             return True, "无法解析命令", 2
         command = m.group(1)
@@ -535,7 +549,7 @@ class ImpartPlugin(MaiBotPlugin):
     @Command(
         "pk",
         description="PK/对决 - 与群友进行牛子对决",
-        pattern=r"^(pk|对决)(\s+@?(?P<target>\d+))?$",
+        pattern=r"^(pk|对决)(\s*@[^\s]+)?\s*$",
     )
     async def handle_pk(self, **kwargs):
         uid_str = self._get_user_id(kwargs)
@@ -558,12 +572,10 @@ class ImpartPlugin(MaiBotPlugin):
 
         _update_cd("pk", uid_str)
 
-        target_str = kwargs.get("matched_groups", {}).get("target")
-        if not target_str:
+        at = self._parse_at_target(kwargs)
+        if not at:
             await self.ctx.send.text("请指定要PK的对象喵，例如: pk @用户", stream_id)
             return True, "无目标", 2
-
-        at = target_str
         if at == uid_str:
             await self.ctx.send.text("你不能pk自己喵", stream_id)
             return True, "无法pk自己", 2
@@ -688,7 +700,7 @@ class ImpartPlugin(MaiBotPlugin):
     @Command(
         "yinpa",
         description="日群友/透群友 - 透群友互动，支持短命令 日/透@用户",
-        pattern=r"^(日|透)(?:群友|群主|管理)?(@?(?P<target>\d+))?$",
+        pattern=r"^(日|透)(?:群友|群主|管理)?(\s*@[^\s]+)?\s*$",
     )
     async def handle_yinpa(self, **kwargs):
         uid_str = self._get_user_id(kwargs)
@@ -712,7 +724,7 @@ class ImpartPlugin(MaiBotPlugin):
 
         user_nick = self._get_nick(kwargs) or f"用户{uid}"
         random_nn = random.uniform(0, 1)
-        at_target = kwargs.get("matched_groups", {}).get("target")
+        at_target = self._parse_at_target(kwargs)
 
         if not at_target:
             jj_len = await db.get_jj_length(self._db_path, uid)

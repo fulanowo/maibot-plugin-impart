@@ -44,7 +44,7 @@
       "version_spec": ">=9.0.0"
     }
   ],
-  "capabilities": ["send_message"],
+  "capabilities": ["send.text", "send.image"],
   "i18n": {
     "default_locale": "zh-CN",
     "supported_locales": ["zh-CN"]
