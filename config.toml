@@ -7,9 +7,6 @@
 # 是否启用插件
 enabled = true
 
-# 数据库文件路径
-db_path = "data/impart.db"
-
 # 未开启时的提示消息
 not_allow = "群内还未开启impart游戏, 请管理员或群主发送\"开始银趴\", \"禁止银趴\"以开启/关闭该功能"
 
@@ -44,6 +41,9 @@ isalive = false
 
 # 禁止名单（逗号分隔的QQ号）
 ban_id_list = ""
+
+# 管理员QQ号列表（逗号分隔），留空则仅依赖 OneBot 原生 role 判断
+admin_ids = ""
 
 
 # 登神挑战配置
