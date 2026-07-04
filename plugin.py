@@ -20,7 +20,8 @@ from maibot_sdk.types import EventType
 from . import database as db
 from .draw_chart import draw_bar_chart
 
-
+# 模块级 CD 缓存：按命令类型分组，每项存 {user_id: last_timestamp}
+# 在 on_unload 中清理，插件重载后不残留旧状态
 _cd_cache = {
     "dajiao": {},
     "pk": {},
@@ -30,6 +31,7 @@ _cd_cache = {
 
 
 def _check_cd(cd_type, uid, cd_time):
+    """检查冷却：已过 cd_time 返回 (True, 0)，否则返回 (False, 剩余秒数)"""
     cache = _cd_cache[cd_type]
     last_time = cache.get(uid, 0)
     elapsed = time.time() - last_time
@@ -37,30 +39,44 @@ def _check_cd(cd_type, uid, cd_time):
 
 
 def _update_cd(cd_type, uid):
+    """记录用户本次使用时间戳"""
     _cd_cache[cd_type][uid] = time.time()
 
 
 def _delete_cd(cd_type, uid):
+    """删除用户的 CD 记录（用于创建新用户等需回退 CD 的场景）"""
     _cd_cache[cd_type].pop(uid, None)
 
 
 def _get_random_num():
+    """
+    带偏置的随机增量生成器：
+    - 90% 概率返回 [0, 1) 之间的值
+    - 10% 概率返回 [1, 2) 之间的值（小概率大涨）
+    """
     rand = random.random()
     return round(random.uniform(0, 1) if rand > 0.1 else random.uniform(1, 2), 3)
 
 
 def _get_jj_variable(config_str):
+    """从逗号分隔的配置串中随机选一个牛牛变量名"""
     parts = [p.strip() for p in config_str.split(",") if p.strip()]
     return choice(parts) if parts else "牛子"
 
 
 def _get_ban_id_set(config_str):
+    """将逗号分隔的 QQ 号串解析为 set，用于 ban/admin 列表"""
     if not config_str:
         return set()
     return set(x.strip() for x in config_str.split(",") if x.strip())
 
 
+# ── 配置模型 ──────────────────────────────────────────────────────────
+# 四层嵌套：plugin / commands / security / challenge
+# SDK 自动从 config.toml 读取并合并为 ImpartPluginConfig 实例
+
 class PluginSectionConfig(PluginConfigBase):
+    """插件基本配置：开关、数据库路径、提示文本等"""
     __ui_label__ = "插件基本配置"
     __ui_icon__ = "package"
     __ui_order__ = 0
@@ -77,6 +93,7 @@ class PluginSectionConfig(PluginConfigBase):
 
 
 class CommandsSectionConfig(PluginConfigBase):
+    """命令配置：各命令的 CD 时间和不活跃惩罚开关"""
     __ui_label__ = "命令配置"
     __ui_icon__ = "terminal"
     __ui_order__ = 1
@@ -89,6 +106,7 @@ class CommandsSectionConfig(PluginConfigBase):
 
 
 class SecuritySectionConfig(PluginConfigBase):
+    """安全配置：ban 名单、管理员 ID 列表"""
     __ui_label__ = "安全与白名单"
     __ui_icon__ = "shield"
     __ui_order__ = 2
@@ -98,6 +116,7 @@ class SecuritySectionConfig(PluginConfigBase):
 
 
 class ChallengeSectionConfig(PluginConfigBase):
+    """登神挑战配置：阈值、惩罚、倍率"""
     __ui_label__ = "登神挑战"
     __ui_icon__ = "trophy"
     __ui_order__ = 3
@@ -109,16 +128,23 @@ class ChallengeSectionConfig(PluginConfigBase):
 
 
 class ImpartPluginConfig(PluginConfigBase):
+    """顶层配置模型，聚合四个子节"""
     plugin: PluginSectionConfig = Field(default_factory=PluginSectionConfig)
     commands: CommandsSectionConfig = Field(default_factory=CommandsSectionConfig)
     security: SecuritySectionConfig = Field(default_factory=SecuritySectionConfig)
     challenge: ChallengeSectionConfig = Field(default_factory=ChallengeSectionConfig)
 
 
+# ── 插件主类 ──────────────────────────────────────────────────────────
+
 class ImpartPlugin(MaiBotPlugin):
+    """银趴插件入口，挂载 9 个命令 + 1 个 ON_START 事件处理器"""
     config_model = ImpartPluginConfig
 
+    # ── 生命周期 ──────────────────────────────────────────────────────
+
     async def on_load(self) -> None:
+        """插件加载时初始化数据库连接和每日惩罚循环"""
         self._db_path = os.path.join(
             os.path.dirname(os.path.abspath(__file__)), self.config.plugin.db_path
         )
@@ -132,6 +158,7 @@ class ImpartPlugin(MaiBotPlugin):
         self.ctx.logger.info("银趴插件已加载")
 
     async def on_unload(self) -> None:
+        """插件卸载时清理后台任务、数据库引擎和 CD 缓存"""
         if hasattr(self, "_daily_task"):
             self._daily_task.cancel()
         db.reset_engine()
@@ -139,6 +166,11 @@ class ImpartPlugin(MaiBotPlugin):
         self.ctx.logger.info("银趴插件已卸载")
 
     async def on_config_update(self, scope: str, config_data: dict, version: str) -> None:
+        """
+        配置热更新回调：
+        - db_path 变动时重置数据库引擎并重新初始化
+        - CD 时间/ban 列表等在 handler 中动态读取 self.config，天然支持热更新
+        """
         new_path = os.path.join(
             os.path.dirname(os.path.abspath(__file__)), self.config.plugin.db_path
         )
@@ -149,7 +181,10 @@ class ImpartPlugin(MaiBotPlugin):
             self.ctx.logger.info("数据库路径已变更，已重新初始化: %s", self._db_path)
         self.ctx.logger.info("配置已更新: scope=%s, version=%s", scope, version)
 
+    # ── kwargs 提取工具 ──────────────────────────────────────────────
+
     def _get_user_id(self, kwargs):
+        """从 kwargs 中提取触发用户的 QQ 号，异常安全"""
         try:
             msg = kwargs.get("message", {})
             return str(msg.get("message_info", {}).get("user_info", {}).get("user_id", "0"))
@@ -157,6 +192,7 @@ class ImpartPlugin(MaiBotPlugin):
             return "0"
 
     def _get_group_id(self, kwargs):
+        """从 kwargs 中提取群号"""
         try:
             msg = kwargs.get("message", {})
             gi = msg.get("message_info", {}).get("group_info")
@@ -165,6 +201,7 @@ class ImpartPlugin(MaiBotPlugin):
             return 0
 
     def _get_nick(self, kwargs):
+        """从 kwargs 中提取用户昵称（优先 cardname > nickname）"""
         try:
             msg = kwargs.get("message", {})
             info = msg.get("message_info", {}).get("user_info", {})
@@ -173,6 +210,10 @@ class ImpartPlugin(MaiBotPlugin):
             return "用户"
 
     def _get_role(self, kwargs):
+        """
+        从 kwargs 的 additional_config 中提取用户群身份（owner/admin/member）。
+        身份由 NapCat 适配器在入站消息编解码时注入。
+        """
         try:
             msg = kwargs.get("message", {})
             add_cfg = msg.get("message_info", {}).get("additional_config", {})
@@ -185,7 +226,10 @@ class ImpartPlugin(MaiBotPlugin):
         return ""
 
     def _parse_at_target(self, kwargs):
-        """从 raw_message 段提取第一个 @ 目标的 user_id。"""
+        """
+        从 raw_message 段中提取第一个 @ 目标的 user_id，
+        不依赖 processed_plain_text 中的 @ 后缀格式。
+        """
         msg = kwargs.get("message", {})
         raw = msg.get("raw_message", [])
         for seg in raw:
@@ -196,7 +240,13 @@ class ImpartPlugin(MaiBotPlugin):
                     return uid
         return None
 
+    # ── 后台任务 ──────────────────────────────────────────────────────
+
     async def _daily_loop(self):
+        """
+        每日凌晨定时任务：
+        如果 isalive 开启，对所有不活跃用户执行长度缩减惩罚。
+        """
         while True:
             now = datetime.now()
             next_run = now.replace(hour=0, minute=0, second=0) + timedelta(days=1)
@@ -209,6 +259,8 @@ class ImpartPlugin(MaiBotPlugin):
                 except Exception:
                     self.ctx.logger.exception("每日惩罚执行失败")
 
+    # ── 帮助 ──────────────────────────────────────────────────────────
+
     @Command(
         "help",
         description="银趴帮助 - 显示使用说明",
@@ -216,6 +268,7 @@ class ImpartPlugin(MaiBotPlugin):
         aliases=["银趴帮助", "impart帮助", "银趴介绍", "impart介绍"],
     )
     async def handle_help(self, **kwargs):
+        """输出全部命令的使用说明"""
         threshold = self.config.challenge.challenge_threshold
         stream_id = kwargs["stream_id"]
         usage_text = (
@@ -244,12 +297,19 @@ class ImpartPlugin(MaiBotPlugin):
         await self.ctx.send.text(usage_text, stream_id)
         return True, "帮助信息已发送", 2
 
+    # ── 查询 ──────────────────────────────────────────────────────────
+
     @Command(
         "query",
         description="查询 - 查询用户牛子长度",
         pattern=r"^查询(\s*@[^\s]+)?\s*$",
     )
     async def handle_query(self, **kwargs):
+        """
+        查询目标用户的当前牛牛长度。
+        未 @ 则查自己。新用户自动创建并初始化为 10cm。
+        按长度区间输出不同段位的提示文案。
+        """
         at_target = self._parse_at_target(kwargs)
         target_uid = int(at_target) if at_target else int(self._get_user_id(kwargs))
         pronoun = "你" if str(target_uid) == self._get_user_id(kwargs) else "TA"
@@ -285,6 +345,8 @@ class ImpartPlugin(MaiBotPlugin):
         await self.ctx.send.text(msg, stream_id)
         return True, "查询成功", 2
 
+    # ── 排行榜 ────────────────────────────────────────────────────────
+
     @Command(
         "jjrank",
         description="jj排行榜 - 查看牛子排行榜（分群过滤，图例显示昵称）",
@@ -292,6 +354,10 @@ class ImpartPlugin(MaiBotPlugin):
         aliases=["牛牛排行榜", "牛牛排名", "牛牛榜单"],
     )
     async def handle_jjrank(self, **kwargs):
+        """
+        输出当前群内的前五 / 后五排名柱状图（图片），
+        并附带用户自身排名文本。数据不足 5 条时提示。
+        """
         uid = int(self._get_user_id(kwargs))
         jj_var = _get_jj_variable(self.config.plugin.jj_variable)
         group_id = self._get_group_id(kwargs)
@@ -334,12 +400,19 @@ class ImpartPlugin(MaiBotPlugin):
         await self.ctx.send.text(f"你的排名为{user_rank}喵", stream_id)
         return True, "排行榜已发送", 2
 
+    # ── 注入查询 ──────────────────────────────────────────────────────
+
     @Command(
         "injection_query",
         description="注入查询 - 查询被注入量（后接历史/全部查看折线图）",
         pattern=r"^(注入查询|摄入查询|射入查询)(\s+(?P<all>历史|全部))?$",
     )
     async def handle_injection_query(self, **kwargs):
+        """
+        查询用户被透的总注入量：
+        - 不加后缀：只显示当日累计量
+        - 后接"历史"/"全部"：显示历史总量 + 折线图
+        """
         at_target = self._parse_at_target(kwargs)
         target_id = int(at_target) if at_target else int(self._get_user_id(kwargs))
         matched = kwargs.get("matched_groups", {})
@@ -378,12 +451,20 @@ class ImpartPlugin(MaiBotPlugin):
 
         return True, "查询成功", 2
 
+    # ── 打胶 ──────────────────────────────────────────────────────────
+
     @Command(
         "dajiao",
         description="打胶/开导 - 增加自己的牛子长度",
         pattern=r"^(打胶|开导)$",
     )
     async def handle_dajiao(self, **kwargs):
+        """
+        打胶 / 开导：随机增加自己的牛牛长度。
+        - 有 CD（默认 300 秒）
+        - 处于登神挑战状态时禁止打胶
+        - 打胶后若长度 ≥25cm 触发登神挑战开启
+        """
         uid_str = self._get_user_id(kwargs)
         uid = int(uid_str)
         jj_var = _get_jj_variable(self.config.plugin.jj_variable)
@@ -444,12 +525,21 @@ class ImpartPlugin(MaiBotPlugin):
         await self.ctx.send.text(msg, stream_id)
         return True, "打胶成功", 2
 
+    # ── 嗦牛子 ────────────────────────────────────────────────────────
+
     @Command(
         "suo",
         description="嗦牛子/嗦 - 增加目标用户的牛子长度",
         pattern=r"^嗦(?:牛子)?(\s*@[^\s]+)?\s*$",
     )
     async def handle_suo(self, **kwargs):
+        """
+        嗦牛子：为@目标（或自己）增加牛牛长度。
+        - 有 CD（默认 300 秒）
+        - 若目标不存在则创建，同时回退 CD
+        - 目标处于挑战状态时禁止嗦
+        - 嗦后若目标长度 ≥25cm 触发登神挑战
+        """
         uid_str = self._get_user_id(kwargs)
         uid = int(uid_str)
         jj_var = _get_jj_variable(self.config.plugin.jj_variable)
@@ -519,12 +609,19 @@ class ImpartPlugin(MaiBotPlugin):
         await self.ctx.send.text(msg, stream_id)
         return True, "嗦成功", 2
 
+    # ── 开关银趴 ──────────────────────────────────────────────────────
+
     @Command(
         "toggle",
         description="开启/关闭银趴 - 管理员开关impart功能",
         pattern=r"^(开始|开启|关闭|禁止)(银趴|impart)$",
     )
     async def handle_toggle(self, **kwargs):
+        """
+        群管理员 / owner 开关本群的 impart 功能。
+        权限判断：先检查 OneBot 原生角色（owner/admin），
+        再 fallback 到配置中的 admin_ids 列表。
+        """
         uid = self._get_user_id(kwargs)
         stream_id = kwargs["stream_id"]
 
@@ -554,12 +651,21 @@ class ImpartPlugin(MaiBotPlugin):
 
         return True, "操作成功", 2
 
+    # ── PK / 对决 ─────────────────────────────────────────────────────
+
     @Command(
         "pk",
         description="PK/对决 - 与群友进行牛子对决",
         pattern=r"^(pk|对决)(\s*@[^\s]+)?\s*$",
     )
     async def handle_pk(self, **kwargs):
+        """
+        PK 对决：双方基于胜率判定胜负。
+        胜方：长度 + (rn/2)，胜率 -1%
+        败方：长度 - rn，胜率 +1%
+        需要 @ 指定对手，不能 pk 自己。
+        若任何一方不存在则自动创建双方，并回退 CD。
+        """
         uid_str = self._get_user_id(kwargs)
         uid = int(uid_str)
         jj_var = _get_jj_variable(self.config.plugin.jj_variable)
@@ -628,6 +734,11 @@ class ImpartPlugin(MaiBotPlugin):
         return True, "PK完成", 2
 
     async def _handle_pk_win(self, uid, at, length_increase, length_decrease, jj_var, bot_name):
+        """
+        PK 胜利后处理双方的登神挑战状态更新：
+        胜方：可能开启挑战 / 完成挑战
+        败方：可能挑战失败 / 跌落神坛 / 变成 xnn / 变成女孩子
+        """
         uid_status = await db.update_challenge_status(self._db_path, int(uid))
         at_status = await db.update_challenge_status(self._db_path, int(at))
 
@@ -667,6 +778,11 @@ class ImpartPlugin(MaiBotPlugin):
         return f"{uid_msg}{probability_msg}"
 
     async def _handle_pk_loss(self, uid, at, length_increase, length_decrease, jj_var, bot_name):
+        """
+        PK 失败后处理双方的登神挑战状态更新：
+        胜方（对手）：可能开启挑战 / 完成挑战
+        败方（己方）：可能挑战失败 / 跌落神坛 / 变成 xnn / 变成女孩子
+        """
         uid_status = await db.update_challenge_status(self._db_path, int(uid))
         at_status = await db.update_challenge_status(self._db_path, int(at))
 
@@ -705,12 +821,22 @@ class ImpartPlugin(MaiBotPlugin):
         probability_msg = f"\n你的胜率现在为{await db.get_win_probability(self._db_path, int(uid)):.0%}喵"
         return f"{uid_msg}{probability_msg}"
 
+    # ── 日群友 / 透群友 ──────────────────────────────────────────────
+
     @Command(
         "yinpa",
         description="日群友/透群友 - 透群友互动，支持短命令 日/透@用户",
         pattern=r"^(日|透)(?:群友|群主|管理)?(\s*@[^\s]+)?\s*$",
     )
     async def handle_yinpa(self, **kwargs):
+        """
+        透群友：核心互动命令。
+        - 有 CD（默认 3600 秒）
+        - 若未 @ 目标：牛牛 >5cm 要求指定目标；≤5cm 时 50% 概率随机送给群友
+        - 检查 ban_id_list 白名单
+        - 生成随机注入量（1-100ml），记录到 ejaculation_data 表
+        - xnn 或负长度时反透自己
+        """
         uid_str = self._get_user_id(kwargs)
         uid = int(uid_str)
         jj_var = _get_jj_variable(self.config.plugin.jj_variable)
@@ -789,14 +915,18 @@ class ImpartPlugin(MaiBotPlugin):
         await self.ctx.send.text(repo, stream_id)
         return True, "透成功", 2
 
+    # ── ON_START 事件 ─────────────────────────────────────────────────
+
     @EventHandler(
         "impart_init",
         description="启动时初始化数据库",
         event_type=EventType.ON_START,
     )
     async def handle_init(self, **kwargs):
+        """ON_START 事件：数据库初始化实际已在 on_load 中完成，此为确认日志"""
         self.ctx.logger.info("ON_START 事件触发: 数据库初始化已在 on_load 中完成")
 
 
 def create_plugin():
+    """SDK 要求的工厂函数，返回插件实例"""
     return ImpartPlugin()
