@@ -135,9 +135,18 @@ class ImpartPlugin(MaiBotPlugin):
         if hasattr(self, "_daily_task"):
             self._daily_task.cancel()
         db.reset_engine()
+        _cd_cache.clear()
         self.ctx.logger.info("银趴插件已卸载")
 
     async def on_config_update(self, scope: str, config_data: dict, version: str) -> None:
+        new_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), self.config.plugin.db_path
+        )
+        if new_path != self._db_path:
+            self._db_path = new_path
+            db.reset_engine()
+            await db.init_db(self._db_path)
+            self.ctx.logger.info("数据库路径已变更，已重新初始化: %s", self._db_path)
         self.ctx.logger.info("配置已更新: scope=%s, version=%s", scope, version)
 
     def _get_user_id(self, kwargs):
