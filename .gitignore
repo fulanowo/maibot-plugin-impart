@@ -33,3 +33,7 @@ TEST_CASES.md
 
 # Git worktrees
 .worktrees/
+
+
+
+*.db
