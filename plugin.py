@@ -907,7 +907,7 @@ class ImpartPlugin(MaiBotPlugin):
             ejaculation = round(random.uniform(1, 100), 3)
             await db.insert_ejaculation(self._db_path, lucky_user, ejaculation)
             repo = (
-                f"好欸！{user_nick}({uid})用时{random.randint(1, 20)}秒 \n"
+                f"好欸！{user_nick}({uid})用时{random.randint(5, 20)}秒 \n"
                 f"给 用户{lucky_user} 注入了{ejaculation}毫升的脱氧核糖核酸, "
                 f"当日总注入量为：{await db.get_today_ejaculation_data(self._db_path, lucky_user)}毫升"
             )
